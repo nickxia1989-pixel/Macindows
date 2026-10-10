@@ -2,7 +2,8 @@
 
 给 macOS 程序坞补上两件事，程序坞本身不被修改：
 
-- **悬停**在程序坞里某个 App 的图标上，弹出它的全部窗口（开着的、隐藏的、最小化的），点哪个切到哪个。
+- **悬停**在程序坞里某个 App 的图标上，弹出它的全部窗口（开着的、隐藏的、最小化的），点哪个切到哪个。窗口按打开的先后排成一排，多了整体缩小，再多就改成标题列表。
+- 程序坞自带的名称标签由 Horizon 的标签顶替，避免和窗口列表叠在一起（程序坞开了放大或自动隐藏时不顶替）。
 - **点击**图标的规则与 Windows 合并任务栏一致：App 只有一个窗口时，点一下切过去，已经是当前窗口就收起；有多个窗口时只弹出窗口列表。
 
 ## 构建与运行
@@ -21,6 +22,7 @@ open build/Horizon.app
 ```bash
 swift test                                         # 点击规则和坐标换算的单元测试
 open -n build/Horizon.app --args --diagnose        # 结果写到 ~/Library/Logs/Horizon/diagnose.txt
+open -n build/Horizon.app --args --selftest        # Horizon 运行时模拟一次悬停（会短暂移动鼠标），结果写到 selftest.txt
 build/Horizon.app/Contents/MacOS/Horizon --render-sample /tmp/horizon-sample   # 用假数据渲染悬停窗版面
 ```
 

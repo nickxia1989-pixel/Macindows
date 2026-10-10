@@ -14,7 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Log.prepare()
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
         log("launch Horizon \(version) on macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
-        defaults.register(defaults: ["enabled": true, "thumbnails": false])
+        defaults.register(defaults: ["enabled": true, "thumbnails": false, "replaceDockLabels": true])
         buildStatusItem()
 
         if Accessibility.promptIfNeeded() {
@@ -47,12 +47,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         running = true
         hover.isEnabled = defaults.bool(forKey: "enabled")
         hover.wantsThumbnails = defaults.bool(forKey: "thumbnails")
+        hover.replacesDockLabels = defaults.bool(forKey: "replaceDockLabels")
         hover.onDrag = { [weak self] in self?.interceptor.mouseDragged(to: $0) }
-        hover.start()
+        let tracking = hover.start()
 
         interceptor.decide = { [weak self] point in self?.decide(clickAt: point) ?? .passThrough }
         let tapped = interceptor.start()
-        log("services started, click interception \(tapped ? "on" : "FAILED")")
+        log("services started, mouse tracking \(tracking ? "on" : "FAILED"), click interception \(tapped ? "on" : "FAILED")")
     }
 
     /// 鼠标在程序坞上按下时：按规则决定截不截这次点击
@@ -103,6 +104,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         thumbnails.target = self
         thumbnails.state = defaults.bool(forKey: "thumbnails") ? .on : .off
         menu.addItem(thumbnails)
+        let labels = NSMenuItem(title: "隐藏程序坞自带的名称标签", action: #selector(toggleLabels), keyEquivalent: "")
+        labels.target = self
+        labels.state = defaults.bool(forKey: "replaceDockLabels") ? .on : .off
+        menu.addItem(labels)
         if defaults.bool(forKey: "thumbnails"), !Thumbnailer.isAuthorized {
             let hint = NSMenuItem(title: "　需要“屏幕录制”权限，授权后请重新打开 Horizon", action: nil, keyEquivalent: "")
             hint.isEnabled = false
@@ -115,8 +120,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         access.target = self
         access.isEnabled = !trusted
         menu.addItem(access)
-        if trusted, running, !interceptor.isRunning {
-            let hint = NSMenuItem(title: "点击拦截未能启动，请重新打开 Horizon", action: nil, keyEquivalent: "")
+        if trusted, running, !(interceptor.isRunning && hover.tracker.isRunning) {
+            let hint = NSMenuItem(title: "鼠标监听未能启动，请重新打开 Horizon", action: nil, keyEquivalent: "")
             hint.isEnabled = false
             menu.addItem(hint)
         }
@@ -142,6 +147,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hover.wantsThumbnails = value
         log("thumbnails=\(value) authorized=\(Thumbnailer.isAuthorized)")
         if value, !Thumbnailer.isAuthorized { Thumbnailer.requestAccess() }
+    }
+
+    @objc private func toggleLabels() {
+        let value = !defaults.bool(forKey: "replaceDockLabels")
+        defaults.set(value, forKey: "replaceDockLabels")
+        hover.replacesDockLabels = value
+        log("replaceDockLabels=\(value)")
     }
 
     @objc private func openAccessibilitySettings() { Accessibility.openSettings() }

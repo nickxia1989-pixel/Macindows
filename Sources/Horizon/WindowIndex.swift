@@ -25,7 +25,7 @@ struct AppSnapshot {
 }
 
 enum WindowIndex {
-    /// 列出一个 App 的全部标准窗口：开着的在前（系统给的前后顺序），最小化的在后。
+    /// 列出一个 App 的全部标准窗口，包括隐藏和最小化的。
     /// 只能看到当前桌面上的窗口和最小化的窗口，其他桌面（Space）上的窗口系统不会给。
     static func snapshot(of app: NSRunningApplication) -> AppSnapshot? {
         guard !app.isTerminated else { return nil }
@@ -46,7 +46,12 @@ enum WindowIndex {
                                      isMinimized: window.bool(kAXMinimizedAttribute) ?? false,
                                      isMain: window.bool(kAXMainAttribute) ?? false))
         }
-        windows = windows.filter { !$0.isMinimized } + windows.filter(\.isMinimized)
+        // 顺序固定为窗口打开的先后（系统窗口号递增），和 Windows 任务栏一致。
+        // 系统给的是前后层次的顺序，每切一次窗口就会变，不能直接用。
+        windows = windows.enumerated().sorted { a, b in
+            let left = a.element.id.map(Int.init) ?? Int.max, right = b.element.id.map(Int.init) ?? Int.max
+            return left != right ? left < right : a.offset < b.offset
+        }.map(\.element)
         let frontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier
         return AppSnapshot(app: app, windows: windows, isHidden: app.isHidden, isFrontmost: frontmost)
     }

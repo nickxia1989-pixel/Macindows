@@ -8,6 +8,12 @@ if let index = arguments.firstIndex(of: "--render-sample"), arguments.indices.co
     exit(0)
 }
 
+if arguments.contains("--selftest") {
+    _ = NSApplication.shared
+    SelfTest.run()
+    exit(0)
+}
+
 if arguments.contains("--diagnose") {
     Diagnose.run()
     exit(0)

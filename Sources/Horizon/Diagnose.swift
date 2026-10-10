@@ -57,3 +57,56 @@ enum Diagnose {
         try? lines.joined(separator: "\n").appending("\n").write(to: url, atomically: true, encoding: .utf8)
     }
 }
+
+/// `Horizon --selftest`：在 Horizon 正常运行时，模拟一次「鼠标停到程序坞图标上」，检查整条链路。
+/// 会把鼠标移到程序坞上约 1 秒再移回原处，不点击任何东西。结果写到日志目录的 selftest.txt。
+enum SelfTest {
+    static let url = Log.directory.appendingPathComponent("selftest.txt")
+
+    static func run() {
+        var lines: [String] = ["Horizon 自检 \(Date())"]
+        defer { try? lines.joined(separator: "\n").appending("\n").write(to: url, atomically: true, encoding: .utf8) }
+        guard Accessibility.isTrusted else { lines.append("未授权辅助功能"); return }
+
+        let dock = DockInspector()
+        dock.refresh()
+        let items = dock.allItems().filter(\.isApplication)
+        guard let target = items.first(where: { item in
+            guard let app = item.runningApp, let snapshot = WindowIndex.snapshot(of: app) else { return false }
+            return !snapshot.windows.isEmpty
+        }), let dockApp = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first else {
+            lines.append("程序坞里没有带窗口的 App，无法自检")
+            return
+        }
+        let list = AXUIElementCreateApplication(dockApp.processIdentifier).elements(kAXChildrenAttribute).first { $0.string(kAXRoleAttribute) == kAXListRole }
+        func dockSelection() -> [String] { (list?.elements(kAXSelectedChildrenAttribute) ?? []).map { $0.string(kAXTitleAttribute) ?? "?" } }
+        func move(_ point: CGPoint) {
+            CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
+        }
+        func spin(_ seconds: TimeInterval) { RunLoop.current.run(until: Date().addingTimeInterval(seconds)) }
+        func logSize() -> UInt64 { ((try? FileManager.default.attributesOfItem(atPath: Log.url.path))?[.size] as? UInt64) ?? 0 }
+
+        let origin = CGEvent(source: nil)?.location ?? .zero
+        let horizontal = dock.frame.width >= dock.frame.height
+        let outside = horizontal ? CGPoint(x: target.frame.midX, y: dock.frame.minY - 240)
+                                 : CGPoint(x: dock.frame.midX < 400 ? dock.frame.maxX + 240 : dock.frame.minX - 240, y: target.frame.midY)
+        let before = logSize()
+        move(outside); spin(0.3)
+        move(CGPoint(x: target.frame.midX, y: target.frame.midY)); spin(0.1)
+        move(CGPoint(x: target.frame.midX + 2, y: target.frame.midY + 1)); spin(1.0)
+
+        let selection = dockSelection()
+        var appended = ""
+        if let handle = try? FileHandle(forReadingFrom: Log.url) {
+            try? handle.seek(toOffset: before)
+            appended = String(data: handle.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            try? handle.close()
+        }
+        lines.append("程序坞自带的名称标签: " + (selection.isEmpty ? "没有出现（已屏蔽）" : "出现了（\(selection.joined(separator: ","))）"))
+        lines.append("Horizon 的窗口列表: " + (appended.contains("show windows of \(target.title)") ? "已弹出" : "没有弹出"))
+
+        move(outside); spin(0.4)
+        move(origin); spin(0.1)
+        lines.append("鼠标已移回原处")
+    }
+}

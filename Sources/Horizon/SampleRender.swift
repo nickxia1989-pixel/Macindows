@@ -6,21 +6,28 @@ enum SampleRender {
     static func run(outputDirectory: String) {
         let directory = URL(fileURLWithPath: outputDirectory, isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let titles = ["traveler/horizon", "AXUIElement | Apple Developer Documentation", "Swift.org"]
-        let states: [PreviewEntry.State] = [.visible, .visible, .minimized]
-        func entries(withImages: Bool) -> [PreviewEntry] {
-            titles.enumerated().map { index, title in
-                PreviewEntry(title: title, state: states[index], isCurrent: index == 0, aspect: [1.5, 0.95, 1.7][index],
-                             thumbnail: withImages && index < 2 ? sampleImage(aspect: [1.5, 0.95, 1.7][index], hue: CGFloat(index) * 0.3 + 0.55) : nil)
+        let titles = ["traveler/horizon", "AXUIElement | Apple Developer Documentation", "Swift.org", "维基百科", "Hacker News", "设计笔记"]
+        let aspects: [CGFloat] = [1.5, 0.95, 1.7, 1.3, 1.6, 0.8]
+        func entries(_ count: Int, images: Bool) -> [PreviewEntry] {
+            (0..<count).map { index in
+                let aspect = aspects[index % aspects.count]
+                // 每三个里留一个没有画面的，检查占位图标
+                let image = images && index % 3 != 2 ? sampleImage(aspect: aspect, hue: CGFloat(index % 6) * 0.14 + 0.5) : nil
+                return PreviewEntry(title: titles[index % titles.count], isCurrent: index == 0, aspect: aspect, thumbnail: image)
             }
         }
         let icon = NSImage(systemSymbolName: "safari", accessibilityDescription: nil)
-        for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
-            write(entries(withImages: false), thumbnails: false, placeholder: nil, appearance: appearance, to: directory.appendingPathComponent("list-\(name).png"))
-            write(entries(withImages: true), thumbnails: true, placeholder: icon, appearance: appearance, to: directory.appendingPathComponent("thumbnails-\(name).png"))
-        }
-        write([PreviewEntry(title: "Horizon — BarController.swift", state: .hidden, isCurrent: false, aspect: 1.4, thumbnail: nil)],
-              thumbnails: false, placeholder: nil, appearance: .darkAqua, to: directory.appendingPathComponent("single-hidden.png"))
+        // 以一块 2560 宽的屏幕为例：3 个窗口正常大小，12 个整体缩小，30 个改成列表
+        let room = CGSize(width: 2536, height: 1300)
+        write({ $0.configure(entries: entries(3, images: false), thumbnails: false, placeholder: nil, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("list-dark.png"))
+        write({ $0.configure(entries: entries(3, images: false), thumbnails: false, placeholder: nil, maxSize: room) }, appearance: .aqua, to: directory.appendingPathComponent("list-light.png"))
+        write({ $0.configure(entries: entries(1, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("thumbnails-1.png"))
+        write({ $0.configure(entries: entries(3, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("thumbnails-3.png"))
+        write({ $0.configure(entries: entries(6, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .aqua, to: directory.appendingPathComponent("thumbnails-6-light.png"))
+        write({ $0.configure(entries: entries(18, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("thumbnails-18-compressed.png"))
+        write({ $0.configure(entries: entries(30, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("thumbnails-30-falls-back-to-list.png"))
+        write({ $0.configureLabel("Google Chrome") }, appearance: .darkAqua, to: directory.appendingPathComponent("label-dark.png"))
+        write({ $0.configureLabel("废纸篓") }, appearance: .aqua, to: directory.appendingPathComponent("label-light.png"))
     }
 
     private static func sampleImage(aspect: CGFloat, hue: CGFloat) -> NSImage {
@@ -32,9 +39,9 @@ enum SampleRender {
         }
     }
 
-    private static func write(_ entries: [PreviewEntry], thumbnails: Bool, placeholder: NSImage?, appearance: NSAppearance.Name, to url: URL) {
+    private static func write(_ build: (PreviewContentView) -> NSSize, appearance: NSAppearance.Name, to url: URL) {
         let content = PreviewContentView()
-        let size = content.configure(entries: entries, thumbnails: thumbnails, placeholder: placeholder)
+        let size = build(content)
         let margin: CGFloat = 16
         let frame = NSRect(x: 0, y: 0, width: size.width + margin * 2, height: size.height + margin * 2)
         let window = NSWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -46,7 +53,7 @@ enum SampleRender {
         root.layer?.backgroundColor = (dark ? NSColor(white: 0.32, alpha: 1) : NSColor(white: 0.72, alpha: 1)).cgColor
         let card = NSView(frame: NSRect(x: margin, y: margin, width: size.width, height: size.height))
         card.wantsLayer = true
-        card.layer?.cornerRadius = 14
+        card.layer?.cornerRadius = min(14, size.height / 2)
         card.layer?.backgroundColor = (dark ? NSColor(white: 0.16, alpha: 1) : NSColor(white: 0.96, alpha: 1)).cgColor
         content.frame = card.bounds
         card.addSubview(content)

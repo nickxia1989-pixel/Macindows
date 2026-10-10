@@ -23,6 +23,11 @@ struct PreviewEntry {
     var thumbnail: NSImage?
 }
 
+/// 应用从不处于激活状态，按钮必须肯响应「第一次点击」，否则第一下会被系统当成激活窗口用掉
+final class FirstMouseButton: NSButton {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 /// 悬停窗里的一项。列表模式下是一行，缩略图模式下是一格。
 final class PreviewItemView: NSView {
     static let rowHeight: CGFloat = 28
@@ -42,7 +47,7 @@ final class PreviewItemView: NSView {
     private let tagLabel = NSTextField(labelWithString: "")
     private let thumbView = NSImageView()
     private let scrim = NSView()
-    private let closeButton = NSButton()
+    private let closeButton = FirstMouseButton()
     private var tracking: NSTrackingArea?
 
     /// thumbSize 为 nil 表示列表行
@@ -287,6 +292,8 @@ final class PreviewPanel: NSPanel {
         container = glass
         super.init(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         isFloatingPanel = true
+        // 只有需要键盘输入的控件才会让面板成为键盘焦点；点条目和按钮不会抢走当前窗口的焦点
+        becomesKeyOnlyIfNeeded = true
         level = .popUpMenu
         backgroundColor = .clear
         isOpaque = false
@@ -298,7 +305,7 @@ final class PreviewPanel: NSPanel {
         contentView = container
     }
 
-    override var canBecomeKey: Bool { false }
+    override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
     func render(entries: [PreviewEntry], thumbnails: Bool, placeholder: NSImage?) -> NSSize {

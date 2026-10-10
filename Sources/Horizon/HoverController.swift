@@ -119,6 +119,9 @@ final class HoverController {
             hide()
             return
         }
+        if !item.isSame(as: shown?.item) {
+            log("show windows of \(item.title): \(snapshot.windows.count) thumbnails=\(showsThumbnails)")
+        }
         shown = (item, app, snapshot)
         render()
         if !panel.isVisible {

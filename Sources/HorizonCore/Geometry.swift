@@ -62,7 +62,7 @@ public func corridor(panelFrame: CGRect, itemFrame: CGRect, dockFrame: CGRect, e
 
 /// 悬停窗开着时，程序坞上位于它正下方（侧边程序坞则是正旁边）的那一整段，两端再各放宽一点（AppKit 坐标）。
 /// 鼠标从图标移向悬停窗、尤其是移向远处的窗口时，往往先贴着程序坞横着走一阵再往上，途中会扫过别的图标。
-/// 在这一段里路过别的图标不算数，要停住一会儿才切换。
+/// 在这一段里，鼠标只是路过别的图标时不切换（见 isPassingThrough）。
 public func aimZone(panelFrame: CGRect, itemFrame: CGRect, dockFrame: CGRect, edge: DockEdge,
                     slack: CGFloat = 12, depth: CGFloat = 60) -> CGRect {
     switch edge {
@@ -78,11 +78,15 @@ public func aimZone(panelFrame: CGRect, itemFrame: CGRect, dockFrame: CGRect, ed
     }
 }
 
-/// 鼠标离悬停窗朝向程序坞的那条边还有多远。数值变小说明鼠标在向悬停窗靠近。
-public func distanceToPanel(from point: CGPoint, panelFrame: CGRect, edge: DockEdge) -> CGFloat {
+/// 鼠标此刻是「路过」还是「到了」。velocity 是 AppKit 坐标下的速度（点/秒）。
+/// 正朝悬停窗的方向走，或者移动得很快，都算路过；慢下来了、又不是朝悬停窗去的，就是到了。
+/// 这样想看另一个 App 时鼠标一停稳就切换，不用等固定的时间；而甩向远处的窗口时途中扫过的图标不会触发。
+public func isPassingThrough(velocity: CGVector, edge: DockEdge, approachSpeed: CGFloat = 50, passSpeed: CGFloat = 450) -> Bool {
+    let toward: CGFloat
     switch edge {
-    case .bottom: return panelFrame.minY - point.y
-    case .left: return panelFrame.minX - point.x
-    case .right: return point.x - panelFrame.maxX
+    case .bottom: toward = velocity.dy
+    case .left: toward = velocity.dx
+    case .right: toward = -velocity.dx
     }
+    return toward >= approachSpeed || hypot(velocity.dx, velocity.dy) >= passSpeed
 }

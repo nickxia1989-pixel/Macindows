@@ -137,11 +137,24 @@ final class GeometryTests: XCTestCase {
         XCTAssertFalse(zone.contains(CGPoint(x: 100, y: 700)))
     }
 
-    func testDistanceToPanelShrinksWhenApproaching() {
-        let panel = CGRect(x: 300, y: 125, width: 1400, height: 160)
-        XCTAssertEqual(distanceToPanel(from: CGPoint(x: 900, y: 45), panelFrame: panel, edge: .bottom), 80)
-        XCTAssertEqual(distanceToPanel(from: CGPoint(x: 700, y: 65), panelFrame: panel, edge: .bottom), 60)
-        XCTAssertEqual(distanceToPanel(from: CGPoint(x: 150, y: 0), panelFrame: CGRect(x: 200, y: 0, width: 100, height: 100), edge: .left), 50)
-        XCTAssertEqual(distanceToPanel(from: CGPoint(x: 350, y: 0), panelFrame: CGRect(x: 200, y: 0, width: 100, height: 100), edge: .right), 50)
+    func testPassingThroughVersusArriving() {
+        // 底部程序坞，悬停窗在上方（AppKit 坐标里 y 向上）
+        // 甩向远处的窗口：很快，带一点向上
+        XCTAssertTrue(isPassingThrough(velocity: CGVector(dx: -1800, dy: 220), edge: .bottom))
+        // 先贴着程序坞快速横扫：没有向上，但速度快
+        XCTAssertTrue(isPassingThrough(velocity: CGVector(dx: 900, dy: 0), edge: .bottom))
+        // 慢慢斜着往上移：不快，但确实在靠近悬停窗
+        XCTAssertTrue(isPassingThrough(velocity: CGVector(dx: 150, dy: 70), edge: .bottom))
+        // 移到隔壁图标上减速停下：又慢又平，是到了
+        XCTAssertFalse(isPassingThrough(velocity: CGVector(dx: 180, dy: 10), edge: .bottom))
+        XCTAssertFalse(isPassingThrough(velocity: CGVector(dx: 0, dy: 0), edge: .bottom))
+        // 往下（远离悬停窗）不算靠近
+        XCTAssertFalse(isPassingThrough(velocity: CGVector(dx: 60, dy: -200), edge: .bottom))
+    }
+
+    func testPassingThroughForSideDocks() {
+        XCTAssertTrue(isPassingThrough(velocity: CGVector(dx: 80, dy: 0), edge: .left))
+        XCTAssertFalse(isPassingThrough(velocity: CGVector(dx: -80, dy: 100), edge: .left))
+        XCTAssertTrue(isPassingThrough(velocity: CGVector(dx: -80, dy: 0), edge: .right))
     }
 }

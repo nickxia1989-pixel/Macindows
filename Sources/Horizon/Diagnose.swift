@@ -144,29 +144,39 @@ enum SelfTest {
                 spin(0.15)
                 let after = panelFrame()
                 lines.append("斜着移向悬停窗、途中扫过相邻图标（\(crossed ? "确实扫到了" : "这次路线没扫到")）: " + (after.map { abs($0.midX - before.midX) < 2 ? "列表没有被换掉" : "列表被换成了别的" } ?? "列表被关掉了"))
-                // 更难的走法：先贴着程序坞横着慢慢扫过两三个图标，再往上进悬停窗。全程约 1.4 秒
+                // 更难的走法：先贴着程序坞快速横扫过两三个图标，再往上进悬停窗
                 hover(target); spin(0.5)
                 if let wide = panelFrame() {
                     let reach = min(200, max(70, (direction > 0 ? wide.maxX - start.x : start.x - wide.minX) - 20))
-                    let corner = CGPoint(x: start.x + direction * reach, y: target.frame.midY - 6)
-                    for step in 1...40 {
-                        let t = CGFloat(step) / 40
-                        move(CGPoint(x: start.x + (corner.x - start.x) * t, y: start.y + (corner.y - start.y) * t)); spin(0.025)
+                    let corner = CGPoint(x: start.x + direction * reach, y: target.frame.midY - 4)
+                    for step in 1...12 {
+                        let t = CGFloat(step) / 12
+                        move(CGPoint(x: start.x + (corner.x - start.x) * t, y: start.y + (corner.y - start.y) * t)); spin(0.016)
                     }
                     let top = CGPoint(x: corner.x, y: wide.maxY - 12)
-                    for step in 1...16 {
-                        let t = CGFloat(step) / 16
-                        move(CGPoint(x: corner.x, y: corner.y + (top.y - corner.y) * t)); spin(0.025)
+                    for step in 1...10 {
+                        let t = CGFloat(step) / 10
+                        move(CGPoint(x: corner.x, y: corner.y + (top.y - corner.y) * t)); spin(0.016)
                     }
-                    spin(0.2)
+                    spin(0.25)
                     let kept = panelFrame()
-                    lines.append("先横着慢扫 \(Int(reach)) 点再往上进悬停窗: " + (kept.map { abs($0.midX - wide.midX) < 2 ? "列表没有被换掉" : "列表被换成了别的" } ?? "列表被关掉了"))
+                    lines.append("先横着快扫 \(Int(reach)) 点再往上进悬停窗: " + (kept.map { abs($0.midX - wide.midX) < 2 ? "列表没有被换掉" : "列表被换成了别的" } ?? "列表被关掉了"))
                 }
-                // 沿着程序坞水平移到相邻图标并停住：应该换成相邻图标的内容（或关闭）
-                hover(target); spin(0.4)
-                hover(neighbor); spin(0.9)
-                let switched = panelFrame()
-                lines.append("水平移到相邻图标并停住: " + (switched.map { abs($0.midX - before.midX) > 2 ? "已换到相邻图标" : "还停在原来的列表上" } ?? "原列表已关闭（相邻图标没有内容）"))
+                // 想看隔壁的 App：像真人那样先快后慢地移到相邻图标上停住，量一下从停稳到换好用了多久
+                hover(target); spin(0.5)
+                let destination = CGPoint(x: neighbor.frame.midX, y: neighbor.frame.midY)
+                for step in 1...10 {
+                    let t = CGFloat(step) / 10, eased = 1 - (1 - t) * (1 - t)
+                    move(CGPoint(x: start.x + (destination.x - start.x) * eased, y: start.y + (destination.y - start.y) * eased)); spin(0.016)
+                }
+                let arrived = Date()
+                var latency: TimeInterval?
+                while Date().timeIntervalSince(arrived) < 1.2 {
+                    if let now = panelFrame(), abs(now.midX - before.midX) > 2 { latency = Date().timeIntervalSince(arrived); break }
+                    if panelFrame() == nil { latency = Date().timeIntervalSince(arrived); break }
+                    spin(0.01)
+                }
+                lines.append("移到相邻图标上停住: " + (latency.map { "停稳后 \(Int(($0 * 1000).rounded())) 毫秒换好" } ?? "1.2 秒内没有换过去"))
             }
         }
 

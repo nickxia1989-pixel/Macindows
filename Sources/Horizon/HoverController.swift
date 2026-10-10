@@ -43,20 +43,18 @@ final class HoverController {
     private var bridge = CGRect.null
     /// 悬停窗贴着程序坞的哪条边
     private var shownEdge = DockEdge.bottom
-    /// 悬停窗正下方的那一段程序坞（AppKit 坐标）。在这里路过别的图标不算数，要停住一会儿才切换
+    /// 悬停窗正下方的那一段程序坞（AppKit 坐标）。鼠标在这里只是路过别的图标时不切换
     private var aimArea = CGRect.null
-    /// 鼠标在这一段里离悬停窗最近到过多远。还在继续靠近，就说明它是冲着悬停窗去的
-    private var aimClosest: CGFloat?
-    /// 鼠标在这一段里当前停在哪个图标上（没在图标上则为 nil）
-    private var aimCandidate: DockItem?
     private var aimTimer: Timer?
+    /// 最近几十毫秒的鼠标位置（AppKit 坐标），用来估算移动速度
+    private var trail: [(time: TimeInterval, point: NSPoint)] = []
     /// 最近截到的画面。窗口最小化或隐藏后截不到新的，就用它
     private var thumbnailCache: [CGWindowID: NSImage] = [:]
 
     private let showDelay: TimeInterval = 0.25
     private let hideDelay: TimeInterval = 0.25
-    /// 悬停窗开着时，鼠标要在它下方的另一个图标上停多久（且不再向悬停窗靠近），才算是真的想换到那个图标
-    private let aimPatience: TimeInterval = 0.4
+    /// 鼠标被判定为「路过」之后如果就此停住，过这么久按它停住的位置重新处理
+    private let aimSettle: TimeInterval = 0.15
 
     func start() {
         guard monitors.isEmpty else { return }
@@ -94,6 +92,10 @@ final class HoverController {
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastMove >= 0.016 else { return }
         lastMove = now
+        // 停顿过之后重新开始算速度；只保留最近 70 毫秒
+        if let last = trail.last, event.timestamp - last.time > 0.12 { trail.removeAll() }
+        trail.append((event.timestamp, location))
+        trail.removeAll { event.timestamp - $0.time > 0.07 }
         evaluate(location: location, point: point)
     }
 
@@ -118,24 +120,19 @@ final class HoverController {
             return
         }
         // 悬停窗很宽时，从图标移向远处的窗口会扫过别的图标（往往先贴着程序坞横着走一阵再往上）。
-        // 所以在悬停窗正下方的这一段里，路过别的图标不切换也不关闭；只有在同一个图标上停够时间、
-        // 并且这段时间里没有再向悬停窗靠近，才按那个图标处理。
-        if honoringAim, panel.isVisible, shown != nil, aimArea.contains(location) {
-            let distance = distanceToPanel(from: location, panelFrame: panel.cardFrame, edge: shownEdge)
-            let approaching = aimClosest.map { distance < $0 - 2 } ?? true
-            if approaching { aimClosest = distance }
-            let sameIcon = item.map { $0.isSame(as: aimCandidate) } ?? (aimCandidate == nil)
-            if approaching || !sameIcon || aimTimer == nil {
-                aimCandidate = item
-                aimTimer?.invalidate()
-                aimTimer = timer(aimPatience) { [weak self] in
-                    guard let self else { return }
-                    self.endAim()
-                    let current = NSEvent.mouseLocation
-                    self.evaluate(location: current, point: topLeftPoint(fromCocoa: current, primaryHeight: primaryScreenHeight), honoringAim: false)
-                }
-            }
+        // 不靠等时间来区分，而是看鼠标怎么动：还在快速移动、或者正朝悬停窗去，就是路过，不切换也不关闭；
+        // 一旦慢下来又不是朝悬停窗去的，就是到了，立刻按它所在的图标处理。
+        if honoringAim, panel.isVisible, shown != nil, aimArea.contains(location),
+           isPassingThrough(velocity: recentVelocity(), edge: shownEdge) {
             cancelHide()
+            // 路过途中突然停住（没有后续的移动事件来触发判断）：稍等一下按停住的位置处理
+            aimTimer?.invalidate()
+            aimTimer = timer(aimSettle) { [weak self] in
+                guard let self else { return }
+                self.endAim()
+                let current = NSEvent.mouseLocation
+                self.evaluate(location: current, point: topLeftPoint(fromCocoa: current, primaryHeight: primaryScreenHeight), honoringAim: false)
+            }
             return
         }
         endAim()
@@ -159,10 +156,15 @@ final class HoverController {
     }
 
     private func endAim() {
-        aimClosest = nil
-        aimCandidate = nil
         aimTimer?.invalidate()
         aimTimer = nil
+    }
+
+    /// 最近几十毫秒的平均速度（点/秒，AppKit 坐标）。样本不够时当作静止
+    private func recentVelocity() -> CGVector {
+        guard let first = trail.first, let last = trail.last, last.time - first.time >= 0.012 else { return .zero }
+        let elapsed = last.time - first.time
+        return CGVector(dx: (last.point.x - first.point.x) / elapsed, dy: (last.point.y - first.point.y) / elapsed)
     }
 
     private func isNearScreenEdge(_ location: NSPoint) -> Bool {

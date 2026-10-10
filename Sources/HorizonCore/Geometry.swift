@@ -59,3 +59,25 @@ public func corridor(panelFrame: CGRect, itemFrame: CGRect, dockFrame: CGRect, e
         return CGRect(x: panelFrame.maxX, y: minY, width: max(0, dockFrame.minX - panelFrame.maxX), height: maxY - minY)
     }
 }
+
+/// 点是否落在三角形内（含边上）
+public func triangleContains(_ p: CGPoint, _ a: CGPoint, _ b: CGPoint, _ c: CGPoint) -> Bool {
+    func side(_ p1: CGPoint, _ p2: CGPoint, _ p3: CGPoint) -> CGFloat { (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y) }
+    let d1 = side(p, a, b), d2 = side(p, b, c), d3 = side(p, c, a)
+    let hasNegative = d1 < 0 || d2 < 0 || d3 < 0
+    let hasPositive = d1 > 0 || d2 > 0 || d3 > 0
+    return !(hasNegative && hasPositive)
+}
+
+/// 鼠标从图标出发、朝悬停窗移动时的「瞄准三角」：顶点是出发位置，底边是悬停窗朝向程序坞的那条边（两端各放宽一点）。
+/// 只要鼠标还在这个三角里，就认为它是冲着悬停窗去的，途中路过别的图标不算数——系统菜单的子菜单用的是同一个办法。
+public func aimTriangle(from origin: CGPoint, panelFrame: CGRect, edge: DockEdge, slack: CGFloat = 10) -> (CGPoint, CGPoint, CGPoint) {
+    switch edge {
+    case .bottom:
+        return (origin, CGPoint(x: panelFrame.minX - slack, y: panelFrame.minY), CGPoint(x: panelFrame.maxX + slack, y: panelFrame.minY))
+    case .left:
+        return (origin, CGPoint(x: panelFrame.minX, y: panelFrame.minY - slack), CGPoint(x: panelFrame.minX, y: panelFrame.maxY + slack))
+    case .right:
+        return (origin, CGPoint(x: panelFrame.maxX, y: panelFrame.minY - slack), CGPoint(x: panelFrame.maxX, y: panelFrame.maxY + slack))
+    }
+}

@@ -8,6 +8,8 @@ struct PreviewEntry {
     /// 窗口的宽高比；缩略图还没截到时先按它占位，免得图到了以后版面跳动
     let aspect: CGFloat?
     var thumbnail: NSImage?
+    /// 不是真正的窗口，而是「这个 App 还没开窗口，点这里开一个」的占位项
+    var isPlaceholder = false
 }
 
 /// 应用从不处于激活状态，按钮必须肯响应「第一次点击」，否则第一下会被系统当成激活窗口用掉
@@ -49,7 +51,7 @@ final class PreviewItemView: NSView {
 
         titleLabel.stringValue = entry.title
         titleLabel.font = entry.isCurrent ? Self.currentFont : Self.titleFont
-        titleLabel.textColor = .labelColor
+        titleLabel.textColor = entry.isPlaceholder ? .secondaryLabelColor : .labelColor
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.toolTip = entry.title
         addSubview(titleLabel)
@@ -75,7 +77,7 @@ final class PreviewItemView: NSView {
             }
             addSubview(thumbView)
         } else {
-            icon.image = NSImage(systemSymbolName: "macwindow", accessibilityDescription: nil)
+            icon.image = NSImage(systemSymbolName: entry.isPlaceholder ? "macwindow.badge.plus" : "macwindow", accessibilityDescription: nil)
             icon.symbolConfiguration = .init(pointSize: 12, weight: entry.isCurrent ? .semibold : .regular)
             icon.contentTintColor = entry.isCurrent ? .controlAccentColor : .secondaryLabelColor
             addSubview(icon)
@@ -143,126 +145,72 @@ final class PreviewItemView: NSView {
 
     // 中键关闭，和浏览器标签页、Windows 任务栏的习惯一致
     override func otherMouseUp(with event: NSEvent) {
-        if event.buttonNumber == 2 { onClose?() }
+        if event.buttonNumber == 2, !entry.isPlaceholder { onClose?() }
     }
 
     @objc private func closeClicked() { onClose?() }
 
     private func setHovering(_ hovering: Bool) {
         highlight.layer?.backgroundColor = (hovering ? NSColor.labelColor.withAlphaComponent(0.1) : .clear).cgColor
-        closeButton.isHidden = !hovering
+        closeButton.isHidden = !hovering || entry.isPlaceholder
     }
 }
 
-/// 圆角底色块。颜色要跟着系统的深浅色外观走，所以放在 updateLayer 里设置。
-final class PillView: NSView {
-    override var wantsUpdateLayer: Bool { true }
+/// 玻璃边缘的反光。系统的玻璃控件边缘有一圈「上亮下暗」的高光，面上也是上浅下深，看起来有厚度；
+/// NSGlassEffectView 画出来的这层很淡，单独看就像一块平的磨砂板，这里把它补足。
+final class GlassRimView: NSView {
+    var cornerRadius: CGFloat = 16 { didSet { needsLayout = true } }
 
-    override func updateLayer() {
-        layer?.cornerRadius = bounds.height / 2
-        layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.12).cgColor
-    }
-}
-
-/// App 还在运行、但一个窗口都没开时显示的一行：点这一行让它开一个窗口，点右边的按钮退出它。
-final class EmptyStateView: NSView {
-    static let message = "点击打开新窗口"
-    static let quitTitle = "退出"
-    static let messageFont = NSFont.systemFont(ofSize: 13)
-    static let quitFont = NSFont.systemFont(ofSize: 12, weight: .medium)
-
-    var onOpen: (() -> Void)?
-    var onQuit: (() -> Void)?
-
-    private let highlight = NSView()
-    private let icon = NSImageView()
-    private let label = NSTextField(labelWithString: EmptyStateView.message)
-    private let pill = PillView()
-    private let quitButton = FirstMouseButton()
-    private var tracking: NSTrackingArea?
-
-    /// 这一行需要的宽度
-    static var preferredWidth: CGFloat {
-        let text = (message as NSString).size(withAttributes: [.font: messageFont]).width
-        return max(220, (32 + text + 14 + quitWidth + 6).rounded(.up))
-    }
-
-    private static var quitWidth: CGFloat {
-        ((quitTitle as NSString).size(withAttributes: [.font: quitFont]).width + 20).rounded(.up)
-    }
+    private let sheen = CAGradientLayer()
+    private let sheenMask = CAShapeLayer()
+    private let rim = CAGradientLayer()
+    private let rimMask = CAShapeLayer()
 
     init() {
         super.init(frame: .zero)
         wantsLayer = true
-        highlight.wantsLayer = true
-        highlight.layer?.cornerRadius = 7
-        addSubview(highlight)
-
-        icon.image = NSImage(systemSymbolName: "macwindow.badge.plus", accessibilityDescription: nil)
-        icon.symbolConfiguration = .init(pointSize: 12, weight: .regular)
-        icon.contentTintColor = .secondaryLabelColor
-        addSubview(icon)
-
-        label.font = Self.messageFont
-        label.textColor = .secondaryLabelColor
-        label.lineBreakMode = .byTruncatingTail
-        addSubview(label)
-
-        pill.wantsLayer = true
-        addSubview(pill)
-        quitButton.isBordered = false
-        quitButton.attributedTitle = NSAttributedString(string: Self.quitTitle, attributes: [.font: Self.quitFont, .foregroundColor: NSColor.labelColor])
-        quitButton.toolTip = "退出这个 App"
-        quitButton.target = self
-        quitButton.action = #selector(quitClicked)
-        addSubview(quitButton)
+        sheen.mask = sheenMask
+        rim.mask = rimMask
+        rimMask.fillColor = nil
+        rimMask.strokeColor = NSColor.black.cgColor
+        rimMask.lineWidth = 1
+        // 图层的单位坐标 y 向上：1 是顶，0 是底
+        for gradient in [sheen, rim] {
+            gradient.startPoint = CGPoint(x: 0.5, y: 1)
+            gradient.endPoint = CGPoint(x: 0.5, y: 0)
+            layer?.addSublayer(gradient)
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    override var isFlipped: Bool { true }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    // 纯装饰，不接鼠标
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func viewDidChangeEffectiveAppearance() { needsLayout = true }
 
     override func layout() {
         super.layout()
-        let width = bounds.width, height = bounds.height
-        highlight.frame = bounds.insetBy(dx: 0, dy: 1)
-        icon.frame = NSRect(x: 8, y: (height - 16) / 2, width: 18, height: 16)
-        let quitFrame = NSRect(x: width - Self.quitWidth - 5, y: (height - 20) / 2, width: Self.quitWidth, height: 20)
-        pill.frame = quitFrame
-        quitButton.frame = quitFrame
-        label.frame = NSRect(x: 32, y: (height - 17) / 2, width: max(0, quitFrame.minX - 10 - 32), height: 17)
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        guard let hit = super.hitTest(point) else { return nil }
-        return hit === quitButton ? hit : self
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let tracking { removeTrackingArea(tracking) }
-        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
-        addTrackingArea(area)
-        tracking = area
-    }
-
-    override func mouseEntered(with event: NSEvent) { setHovering(true) }
-    override func mouseExited(with event: NSEvent) { setHovering(false) }
-    override func mouseDown(with event: NSEvent) {}
-
-    override func mouseUp(with event: NSEvent) {
-        if bounds.contains(convert(event.locationInWindow, from: nil)) { onOpen?() }
-    }
-
-    @objc private func quitClicked() { onQuit?() }
-
-    private func setHovering(_ hovering: Bool) {
-        highlight.layer?.backgroundColor = (hovering ? NSColor.labelColor.withAlphaComponent(0.1) : .clear).cgColor
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        func white(_ alpha: CGFloat) -> CGColor { NSColor.white.withAlphaComponent(alpha).cgColor }
+        func black(_ alpha: CGFloat) -> CGColor { NSColor.black.withAlphaComponent(alpha).cgColor }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for gradient in [sheen, rim] { gradient.frame = bounds }
+        sheenMask.path = CGPath(roundedRect: bounds, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
+        let inset = bounds.insetBy(dx: 0.5, dy: 0.5)
+        let radius = max(0, cornerRadius - 0.5)
+        rimMask.path = CGPath(roundedRect: inset, cornerWidth: radius, cornerHeight: radius, transform: nil)
+        // 面：上沿略亮，下沿略暗
+        sheen.colors = dark ? [white(0.10), white(0), black(0.08)] : [white(0.35), white(0), black(0.03)]
+        sheen.locations = [0, 0.55, 1]
+        // 边：顶上一道亮线，两侧淡下去，底边留一点反光
+        rim.colors = dark ? [white(0.46), white(0.16), white(0.06), white(0.18)] : [white(0.95), white(0.6), white(0.35), white(0.6)]
+        rim.locations = [0, 0.3, 0.72, 1]
+        CATransaction.commit()
     }
 }
 
-/// 悬停窗的内容：一组窗口（没有标题行），或者「没有打开的窗口」那一行。
+/// 悬停窗的内容：一组窗口，没有标题行。
 final class PreviewContentView: NSView {
     static let padding: CGFloat = 6
     static let spacing: CGFloat = 4
@@ -271,9 +219,6 @@ final class PreviewContentView: NSView {
 
     var onSelect: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
-    /// 「没有打开的窗口」那一行被点击 / 它的退出按钮被点击
-    var onOpen: (() -> Void)?
-    var onQuit: (() -> Void)?
     private(set) var items: [PreviewItemView] = []
     private var extras: [NSView] = []
 
@@ -298,20 +243,6 @@ final class PreviewContentView: NSView {
         }
         setFrameSize(result)
         return result
-    }
-
-    @discardableResult
-    func configureEmpty() -> NSSize {
-        reset()
-        let row = EmptyStateView()
-        row.frame = NSRect(x: Self.padding, y: Self.padding, width: EmptyStateView.preferredWidth, height: PreviewItemView.rowHeight)
-        row.onOpen = { [weak self] in self?.onOpen?() }
-        row.onQuit = { [weak self] in self?.onQuit?() }
-        addSubview(row)
-        extras = [row]
-        let size = NSSize(width: row.frame.width + Self.padding * 2, height: PreviewItemView.rowHeight + Self.padding * 2)
-        setFrameSize(size)
-        return size
     }
 
     /// 横向一排，窗口多了就整体缩小；缩到最小还放不下则返回 nil，由调用方改用列表。
@@ -376,6 +307,7 @@ final class PreviewPanel: NSPanel {
     let content = PreviewContentView()
     private let glass = NSGlassEffectView()
     private let root = NSView()
+    private let rimView = GlassRimView()
     private let shadowLayer = CALayer()
     private let shadowMask = CAShapeLayer()
 
@@ -404,6 +336,7 @@ final class PreviewPanel: NSPanel {
         shadowLayer.mask = shadowMask
         root.layer?.addSublayer(shadowLayer)
         root.addSubview(glass)
+        root.addSubview(rimView)
         contentView = root
     }
 
@@ -414,12 +347,6 @@ final class PreviewPanel: NSPanel {
         apply(content.configure(entries: entries, thumbnails: thumbnails, placeholder: placeholder, maxSize: maxSize), cornerRadius: 16)
     }
 
-    /// 单行的小卡片做成两头全圆，和系统的名称气泡是同一种形状
-    func renderEmpty() -> NSSize {
-        let size = content.configureEmpty()
-        return apply(size, cornerRadius: size.height / 2)
-    }
-
     private func apply(_ size: NSSize, cornerRadius: CGFloat) -> NSSize {
         let margin = Self.margin
         let bounds = NSRect(x: 0, y: 0, width: size.width + margin * 2, height: size.height + margin * 2)
@@ -428,6 +355,8 @@ final class PreviewPanel: NSPanel {
         root.frame = bounds
         glass.cornerRadius = cornerRadius
         glass.frame = card
+        rimView.frame = card
+        rimView.cornerRadius = cornerRadius
         content.frame = NSRect(origin: .zero, size: size)
 
         let outline = CGPath(roundedRect: card, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)

@@ -13,7 +13,7 @@ final class HoverController {
     private enum Shown {
         /// 一个 App 的窗口列表
         case windows(DockItem, NSRunningApplication, AppSnapshot)
-        /// App 在运行但没有窗口：一行提示，可以打开窗口或退出
+        /// App 在运行但没有窗口：一个占位项，点它开一个窗口
         case empty(DockItem, NSRunningApplication)
 
         var item: DockItem {
@@ -41,11 +41,19 @@ final class HoverController {
     private var captureGeneration = 0
     /// 悬停窗和程序坞之间的空隙（AppKit 坐标）。鼠标从图标移向悬停窗时经过这里，不算离开
     private var bridge = CGRect.null
+    /// 悬停窗贴着程序坞的哪条边
+    private var shownEdge = DockEdge.bottom
+    /// 鼠标最近一次停在「悬停窗所属图标」上的位置（AppKit 坐标）。从这里出发朝悬停窗移动时，路过别的图标不算数
+    private var aimOrigin: NSPoint?
+    private var aimTimer: Timer?
     /// 最近截到的画面。窗口最小化或隐藏后截不到新的，就用它
     private var thumbnailCache: [CGWindowID: NSImage] = [:]
 
     private let showDelay: TimeInterval = 0.25
     private let hideDelay: TimeInterval = 0.25
+    /// 朝悬停窗移动的途中在别的图标上停多久，才算是真的想换到那个图标
+    private let aimPatience: TimeInterval = 0.3
+    static let placeholderTitle = "点击打开新窗口"
 
     func start() {
         guard monitors.isEmpty else { return }
@@ -61,8 +69,6 @@ final class HoverController {
         }
         panel.content.onSelect = { [weak self] in self?.select($0) }
         panel.content.onClose = { [weak self] in self?.close($0) }
-        panel.content.onOpen = { [weak self] in self?.openWindow() }
-        panel.content.onQuit = { [weak self] in self?.quit() }
     }
 
     func stop() {
@@ -85,10 +91,15 @@ final class HoverController {
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastMove >= 0.016 else { return }
         lastMove = now
+        evaluate(location: location, point: point)
+    }
 
-        // 鼠标已经移进悬停窗，或正在从图标移向它的路上：保持显示
+    /// 按鼠标当前位置决定悬停窗的去留。location 是 AppKit 坐标，point 是同一位置的左上角原点坐标。
+    private func evaluate(location: NSPoint, point: CGPoint) {
+        // 鼠标已经移进悬停窗，或正在从图标移向它的空隙里：保持显示
         if panel.isVisible, panel.cardFrame.insetBy(dx: -4, dy: -4).contains(location) || bridge.contains(location) {
             cancelHide()
+            endAim()
             return
         }
         // 自动隐藏的程序坞滑出来时位置会变，靠近屏幕边缘时查得勤一点
@@ -97,9 +108,29 @@ final class HoverController {
         let item = dock.item(at: point).flatMap { $0.isApplication ? $0 : nil }
         if let item, item.isSame(as: hovered) {
             // 只有鼠标停在「悬停窗所属的那个图标」上才续命；停在别的没有内容可显示的图标上，旧的悬停窗照常关闭
-            if item.isSame(as: shown?.item) { cancelHide() }
+            if item.isSame(as: shown?.item) {
+                cancelHide()
+                aimOrigin = location
+            }
             return
         }
+        // 悬停窗很宽时，从图标斜着移向远处的窗口会扫过别的图标。只要鼠标还在「出发点—悬停窗」这个三角里，
+        // 就当它是冲着悬停窗去的，不切换也不关闭；真在某个图标上停住了，过一会儿再按那个图标处理。
+        if panel.isVisible, shown != nil, let origin = aimOrigin {
+            let triangle = aimTriangle(from: origin, panelFrame: panel.cardFrame, edge: shownEdge)
+            if triangleContains(location, triangle.0, triangle.1, triangle.2) {
+                cancelHide()
+                aimTimer?.invalidate()
+                aimTimer = timer(aimPatience) { [weak self] in
+                    guard let self else { return }
+                    self.endAim()
+                    let current = NSEvent.mouseLocation
+                    self.evaluate(location: current, point: topLeftPoint(fromCocoa: current, primaryHeight: primaryScreenHeight))
+                }
+                return
+            }
+        }
+        endAim()
         guard item != nil || hovered != nil else { return }
         hovered = item
         showTimer?.invalidate()
@@ -117,6 +148,12 @@ final class HoverController {
                 self.present(item, app: app, snapshot: WindowIndex.snapshot(of: app) ?? snapshot)
             }
         }
+    }
+
+    private func endAim() {
+        aimOrigin = nil
+        aimTimer?.invalidate()
+        aimTimer = nil
     }
 
     private func isNearScreenEdge(_ location: NSPoint) -> Bool {
@@ -152,7 +189,11 @@ final class HoverController {
             shown = .empty(item, app)
             signature = ""
             captureGeneration += 1
-            if let layout = layout(for: item) { place(panel.renderEmpty(), layout) }
+            // 和只有一个窗口时的悬停窗一样大：标题换成提示语，画面的位置放 App 图标
+            let entry = PreviewEntry(title: Self.placeholderTitle, isCurrent: false, aspect: nil, thumbnail: nil, isPlaceholder: true)
+            if let layout = layout(for: item) {
+                place(panel.render(entries: [entry], thumbnails: showsThumbnails, placeholder: app.icon, maxSize: layout.maxSize), layout)
+            }
         } else {
             if case .windows(let current, _, _)? = shown, current.isSame(as: item) {} else {
                 log("show windows of \(item.title): \(snapshot.windows.count) thumbnails=\(showsThumbnails)")
@@ -161,6 +202,8 @@ final class HoverController {
             render()
             loadThumbnails()
         }
+        // 悬停窗出现时鼠标就在它所属的图标上（悬停或点击触发），从这里开始算瞄准
+        aimOrigin = NSEvent.mouseLocation
         reveal()
         if refreshTimer == nil {
             let refresh = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.refresh() }
@@ -188,6 +231,7 @@ final class HoverController {
         signature = ""
         captureGeneration += 1
         bridge = .null
+        endAim()
         if panel.isVisible { panel.orderOut(nil) }
     }
 
@@ -239,6 +283,7 @@ final class HoverController {
         let origin = panelOrigin(panelSize: size, itemFrame: layout.itemFrame, dockFrame: layout.dockFrame,
                                  edge: layout.edge, visibleFrame: layout.visible, gap: layout.gap)
         panel.setCardOrigin(origin)
+        shownEdge = layout.edge
         bridge = corridor(panelFrame: NSRect(origin: origin, size: size), itemFrame: layout.itemFrame, dockFrame: layout.dockFrame, edge: layout.edge)
     }
 
@@ -324,6 +369,11 @@ final class HoverController {
     // MARK: 操作
 
     private func select(_ index: Int) {
+        // 占位项只有一个：点它就是开窗口
+        if case .empty? = shown {
+            openWindow()
+            return
+        }
         guard case .windows(_, let app, let snapshot)? = shown, snapshot.windows.indices.contains(index) else { return }
         let window = snapshot.windows[index]
         hide()
@@ -349,10 +399,4 @@ final class HoverController {
         }
     }
 
-    private func quit() {
-        guard case .empty(let item, let app)? = shown else { return }
-        hide()
-        log("quit \(item.title)")
-        app.terminate()
-    }
 }

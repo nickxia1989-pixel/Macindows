@@ -1,5 +1,6 @@
 import AppKit
 import HorizonCore
+import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
@@ -109,6 +110,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(hint)
         }
 
+        let login = NSMenuItem(title: "登录时自动启动", action: #selector(toggleLoginItem), keyEquivalent: "")
+        login.target = self
+        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        menu.addItem(login)
+
         menu.addItem(.separator())
         let access = NSMenuItem(title: trusted ? "辅助功能权限：已授权" : "辅助功能权限：未授权，点此打开系统设置",
                                 action: trusted ? nil : #selector(openAccessibilitySettings), keyEquivalent: "")
@@ -142,6 +148,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hover.wantsThumbnails = value
         log("thumbnails=\(value) authorized=\(Thumbnailer.isAuthorized)")
         if value, !Thumbnailer.isAuthorized { Thumbnailer.requestAccess() }
+    }
+
+    /// 把 Horizon 自己登记为（或撤销）登录项。登记的是当前这个 App 所在的位置，挪动 App 后需要重新勾选。
+    @objc private func toggleLoginItem() {
+        let service = SMAppService.mainApp
+        do {
+            if service.status == .enabled {
+                try service.unregister()
+            } else {
+                try service.register()
+            }
+            log("login item status=\(service.status.rawValue)")
+        } catch {
+            log("login item change failed: \(error.localizedDescription)")
+            let alert = NSAlert()
+            alert.messageText = "无法更改登录时自动启动"
+            alert.informativeText = error.localizedDescription
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
     }
 
     @objc private func openAccessibilitySettings() { Accessibility.openSettings() }

@@ -1,5 +1,6 @@
 import AppKit
 import HorizonCore
+import ServiceManagement
 
 /// `Horizon --diagnose`：把运行环境和程序坞的读取结果写到日志目录，不常驻。
 /// 要通过「open Horizon.app --args --diagnose」启动，权限才算在 Horizon 自己头上。
@@ -18,6 +19,7 @@ enum Diagnose {
         add("macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
         add("辅助功能权限: \(Accessibility.isTrusted ? "已授权" : "未授权")")
         add("屏幕录制权限: \(Thumbnailer.isAuthorized ? "已授权" : "未授权")")
+        add("登录时自动启动: \(SMAppService.mainApp.status == .enabled ? "已开启" : "未开启")")
         add("私有接口: " + PrivateAPI.availability.map { "\($0.0)=\($0.1 ? "可用" : "缺失")" }.joined(separator: " "))
         for screen in NSScreen.screens {
             add("屏幕 \(screen.localizedName): 全部\(brief(screen.frame)) 可用\(brief(screen.visibleFrame))")
@@ -59,7 +61,7 @@ enum Diagnose {
 }
 
 /// `Horizon --selftest`：在 Horizon 正常运行时模拟几次鼠标移动，检查悬停相关的行为。
-/// 会把鼠标在程序坞附近移动约 7 秒再移回原处，不点击任何东西。结果写到日志目录的 selftest.txt。
+/// 会把鼠标在程序坞附近移动约 10 秒再移回原处，不点击任何东西。结果写到日志目录的 selftest.txt。
 enum SelfTest {
     static let url = Log.directory.appendingPathComponent("selftest.txt")
 
@@ -124,15 +126,41 @@ enum SelfTest {
         move(CGPoint(x: panel.midX, y: panel.midY)); spin(0.05); move(CGPoint(x: panel.midX + 1, y: panel.midY)); spin(0.6)
         lines.append("鼠标移进列表: " + (panelFrame() != nil ? "列表保持显示" : "列表被关掉了"))
 
-        // 列表开着时移到「在运行但没有窗口」的 App 上：换成一行的小卡片
+        // 从图标斜着移向悬停窗的远端一角，途中会扫过相邻的图标：列表应该一直是原来那个
+        if horizontal, let neighbor = items.first(where: { abs($0.frame.midX - target.frame.midX) > 40 && abs($0.frame.midX - target.frame.midX) < 140 }) {
+            hover(target); spin(0.5)
+            if let before = panelFrame() {
+                let start = CGPoint(x: target.frame.midX, y: target.frame.midY)
+                // 终点：悬停窗在邻居那一侧、靠近程序坞的那个角的外侧，这条路线会从邻居图标上方掠过
+                let direction: CGFloat = neighbor.frame.midX > target.frame.midX ? 1 : -1
+                let end = CGPoint(x: neighbor.frame.midX + direction * 30, y: dock.frame.minY - gap * 0.4)
+                var crossed = false
+                for step in 1...14 {
+                    let t = CGFloat(step) / 14
+                    let p = CGPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t)
+                    if neighbor.frame.contains(p) { crossed = true }
+                    move(p); spin(0.012)
+                }
+                spin(0.15)
+                let after = panelFrame()
+                lines.append("斜着移向悬停窗、途中扫过相邻图标（\(crossed ? "确实扫到了" : "这次路线没扫到")）: " + (after.map { abs($0.midX - before.midX) < 2 ? "列表没有被换掉" : "列表被换成了别的" } ?? "列表被关掉了"))
+                // 沿着程序坞水平移到相邻图标并停住：应该换成相邻图标的内容（或关闭）
+                hover(target); spin(0.4)
+                hover(neighbor); spin(0.9)
+                let switched = panelFrame()
+                lines.append("水平移到相邻图标并停住: " + (switched.map { abs($0.midX - before.midX) > 2 ? "已换到相邻图标" : "还停在原来的列表上" } ?? "原列表已关闭（相邻图标没有内容）"))
+            }
+        }
+
+        // 列表开着时移到「在运行但没有窗口」的 App 上：换成一个占位卡片
         if let idle {
             hover(target); spin(0.4)
             let list = panelFrame()
             hover(idle); spin(0.2)
             move(CGPoint(x: idle.frame.midX - 2, y: idle.frame.midY)); spin(0.7)
             if let card = panelFrame() {
-                let moved = abs(card.midX - (list?.midX ?? card.midX)) > 20 || card.height < (list?.height ?? 0)
-                lines.append("移到在运行但没有窗口的 App 上: " + (card.height <= 44 && moved ? "换成了小卡片（\(Int(card.width))x\(Int(card.height))）" : "显示的不是小卡片（\(Int(card.width))x\(Int(card.height))）"))
+                let anchored = abs(card.midX - idle.frame.midX) < 80 || abs(card.midY - idle.frame.midY) < 80
+                lines.append("移到在运行但没有窗口的 App 上: " + (anchored && card.midX != list?.midX ? "换成了占位卡片（\(Int(card.width))x\(Int(card.height))，单窗口列表的大小）" : "卡片没有跟到这个图标上"))
             } else {
                 lines.append("移到在运行但没有窗口的 App 上: 什么都没显示")
             }

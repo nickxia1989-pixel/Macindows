@@ -99,4 +99,30 @@ final class GeometryTests: XCTestCase {
         let panel = CGRect(x: 200, y: 823, width: 300, height: 200)
         XCTAssertEqual(corridor(panelFrame: panel, itemFrame: item, dockFrame: dock, edge: .left), CGRect(x: 59, y: 823, width: 141, height: 200))
     }
+
+    func testAimTriangleKeepsADiagonalPathButNotASidewaysOne() {
+        // 底部程序坞：图标在下，很宽的悬停窗在上方
+        let origin = CGPoint(x: 1000, y: 45)
+        let panel = CGRect(x: 300, y: 125, width: 1400, height: 160)
+        let (a, b, c) = aimTriangle(from: origin, panelFrame: panel, edge: .bottom)
+        // 朝悬停窗最左边那一格斜着移过去，途中每一点都在三角里
+        let target = CGPoint(x: 320, y: 125)
+        for step in 1...9 {
+            let t = CGFloat(step) / 10
+            XCTAssertTrue(triangleContains(CGPoint(x: origin.x + (target.x - origin.x) * t, y: origin.y + (target.y - origin.y) * t), a, b, c))
+        }
+        // 沿着程序坞水平移到隔壁图标：不在三角里，应该立刻切换
+        XCTAssertFalse(triangleContains(CGPoint(x: 937, y: 45), a, b, c))
+        XCTAssertFalse(triangleContains(CGPoint(x: 1063, y: 44), a, b, c))
+        // 往下移（离开程序坞方向相反）也不算
+        XCTAssertFalse(triangleContains(CGPoint(x: 1000, y: 20), a, b, c))
+    }
+
+    func testAimTriangleForASideDock() {
+        let origin = CGPoint(x: 30, y: 600)
+        let panel = CGRect(x: 200, y: 300, width: 300, height: 600)
+        let (a, b, c) = aimTriangle(from: origin, panelFrame: panel, edge: .left)
+        XCTAssertTrue(triangleContains(CGPoint(x: 120, y: 480), a, b, c))
+        XCTAssertFalse(triangleContains(CGPoint(x: 30, y: 540), a, b, c))
+    }
 }

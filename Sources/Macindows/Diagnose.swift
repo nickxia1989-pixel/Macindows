@@ -1,9 +1,9 @@
 import AppKit
-import HorizonCore
+import MacindowsCore
 import ServiceManagement
 
-/// `Horizon --diagnose`：把运行环境和程序坞的读取结果写到日志目录，不常驻。
-/// 要通过「open Horizon.app --args --diagnose」启动，权限才算在 Horizon 自己头上。
+/// `Macindows --diagnose`：把运行环境和程序坞的读取结果写到日志目录，不常驻。
+/// 要通过「open Macindows.app --args --diagnose」启动，权限才算在 Macindows 自己头上。
 enum Diagnose {
     static let url = Log.directory.appendingPathComponent("diagnose.txt")
 
@@ -15,7 +15,7 @@ enum Diagnose {
             rect.isNull ? "读不到" : "(\(Int(rect.minX)),\(Int(rect.minY)) \(Int(rect.width))x\(Int(rect.height)))"
         }
 
-        add("Horizon 诊断 \(Date())")
+        add("Macindows 诊断 \(Date())")
         add("macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
         add("辅助功能权限: \(Accessibility.isTrusted ? "已授权" : "未授权")")
         add("屏幕录制权限: \(Thumbnailer.isAuthorized ? "已授权" : "未授权")")
@@ -60,13 +60,13 @@ enum Diagnose {
     }
 }
 
-/// `Horizon --selftest`：在 Horizon 正常运行时模拟几次鼠标移动，检查悬停相关的行为。
+/// `Macindows --selftest`：在 Macindows 正常运行时模拟几次鼠标移动，检查悬停相关的行为。
 /// 会把鼠标在程序坞附近移动约 17 秒再移回原处。期间会在一个图标上点一次右键并用 Esc 关掉菜单，不做其他点击。结果写到日志目录的 selftest.txt。
 enum SelfTest {
     static let url = Log.directory.appendingPathComponent("selftest.txt")
 
     static func run() {
-        var lines: [String] = ["Horizon 自检 \(Date())"]
+        var lines: [String] = ["Macindows 自检 \(Date())"]
         defer { try? lines.joined(separator: "\n").appending("\n").write(to: url, atomically: true, encoding: .utf8) }
         guard Accessibility.isTrusted else { lines.append("未授权辅助功能"); return }
 
@@ -91,11 +91,11 @@ enum SelfTest {
             move(CGPoint(x: item.frame.midX, y: item.frame.midY)); spin(0.08)
             move(CGPoint(x: item.frame.midX + 2, y: item.frame.midY + 1))
         }
-        /// 正在运行的那个 Horizon 的悬停窗在屏幕上的位置（左上角为原点）；没显示则为 nil
+        /// 正在运行的那个 Macindows 的悬停窗在屏幕上的位置（左上角为原点）；没显示则为 nil
         func panelFrame() -> CGRect? {
             let me = ProcessInfo.processInfo.processIdentifier
             let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
-            for window in info where (window[kCGWindowOwnerName as String] as? String) == "Horizon" {
+            for window in info where (window[kCGWindowOwnerName as String] as? String) == "Macindows" {
                 guard (window[kCGWindowOwnerPID as String] as? Int32) != me, (window[kCGWindowLayer as String] as? Int) == Int(CGWindowLevelForKey(.popUpMenuWindow)),
                       let bounds = window[kCGWindowBounds as String] as? [String: Any], let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { continue }
                 return rect.insetBy(dx: PreviewPanel.margin, dy: PreviewPanel.margin)

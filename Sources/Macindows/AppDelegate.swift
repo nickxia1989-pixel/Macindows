@@ -1,5 +1,5 @@
 import AppKit
-import HorizonCore
+import MacindowsCore
 import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -14,7 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.prepare()
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
-        log("launch Horizon \(version) on macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
+        log("launch Macindows \(version) on macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
         defaults.register(defaults: ["enabled": true, "thumbnails": false])
         buildStatusItem()
 
@@ -53,6 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         interceptor.decide = { [weak self] point in self?.decide(clickAt: point) ?? .passThrough }
         interceptor.onMouseDown = { [weak self] point in self?.hover.mouseDown(at: point, opensMenu: false) }
+        // 开了缩略图却还没有屏幕录制权限（例如刚换了新的应用标识）：让系统弹出授权请求
+        if hover.wantsThumbnails, !Thumbnailer.isAuthorized { Thumbnailer.requestAccess() }
         let tapped = interceptor.start()
         log("services started, click interception \(tapped ? "on" : "FAILED")")
     }
@@ -86,7 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func buildStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "sun.horizon", accessibilityDescription: "Horizon")
+        statusItem.button?.image = MenuBarIcon.image
         let menu = NSMenu()
         menu.delegate = self
         statusItem.menu = menu
@@ -96,7 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.removeAllItems()
         let trusted = Accessibility.isTrusted
 
-        let enabled = NSMenuItem(title: "启用 Horizon", action: #selector(toggleEnabled), keyEquivalent: "")
+        let enabled = NSMenuItem(title: "启用 Macindows", action: #selector(toggleEnabled), keyEquivalent: "")
         enabled.target = self
         enabled.state = defaults.bool(forKey: "enabled") ? .on : .off
         menu.addItem(enabled)
@@ -106,7 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         thumbnails.state = defaults.bool(forKey: "thumbnails") ? .on : .off
         menu.addItem(thumbnails)
         if defaults.bool(forKey: "thumbnails"), !Thumbnailer.isAuthorized {
-            let hint = NSMenuItem(title: "　需要“屏幕录制”权限，授权后请重新打开 Horizon", action: nil, keyEquivalent: "")
+            let hint = NSMenuItem(title: "　需要“屏幕录制”权限，授权后请重新打开 Macindows", action: nil, keyEquivalent: "")
             hint.isEnabled = false
             menu.addItem(hint)
         }
@@ -123,7 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         access.isEnabled = !trusted
         menu.addItem(access)
         if trusted, running, !interceptor.isRunning {
-            let hint = NSMenuItem(title: "点击拦截未能启动，请重新打开 Horizon", action: nil, keyEquivalent: "")
+            let hint = NSMenuItem(title: "点击拦截未能启动，请重新打开 Macindows", action: nil, keyEquivalent: "")
             hint.isEnabled = false
             menu.addItem(hint)
         }
@@ -133,7 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(logItem)
 
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "退出 Horizon", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "退出 Macindows", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
     @objc private func toggleEnabled() {
@@ -151,7 +153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if value, !Thumbnailer.isAuthorized { Thumbnailer.requestAccess() }
     }
 
-    /// 把 Horizon 自己登记为（或撤销）登录项。登记的是当前这个 App 所在的位置，挪动 App 后需要重新勾选。
+    /// 把 Macindows 自己登记为（或撤销）登录项。登记的是当前这个 App 所在的位置，挪动 App 后需要重新勾选。
     @objc private func toggleLoginItem() {
         let service = SMAppService.mainApp
         do {

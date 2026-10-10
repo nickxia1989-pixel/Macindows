@@ -1,6 +1,6 @@
 import AppKit
 
-/// `Horizon --render-sample <目录>`：用假数据把悬停窗的版面画成图片，不需要任何权限。
+/// `Macindows --render-sample <目录>`：用假数据把悬停窗的版面画成图片，不需要任何权限。
 /// 只用于检查排版；玻璃材质是合成器效果，离屏渲染里看不到，这里用纯色底代替。
 enum SampleRender {
     static func run(outputDirectory: String) {
@@ -25,10 +25,36 @@ enum SampleRender {
         write({ $0.configure(entries: entries(3, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("thumbnails-3.png"))
         write({ $0.configure(entries: entries(6, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .aqua, to: directory.appendingPathComponent("thumbnails-6-light.png"))
         write({ $0.configure(entries: entries(18, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("thumbnails-18-compressed.png"))
+        writeMenuBarIcon(to: directory)
         let empty = [PreviewEntry(title: "备忘录", isCurrent: false, aspect: nil, thumbnail: nil, isPlaceholder: true)]
         write({ $0.configure(entries: empty, thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("empty-thumbnail.png"))
         write({ $0.configure(entries: empty, thumbnails: false, placeholder: nil, maxSize: room) }, appearance: .aqua, to: directory.appendingPathComponent("empty-list-light.png"))
         write({ $0.configure(entries: entries(30, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("thumbnails-30-falls-back-to-list.png"))
+    }
+
+    /// 菜单栏图标：实际大小（2 倍屏）和放大 12 倍各一张，深浅两种底色
+    private static func writeMenuBarIcon(to directory: URL) {
+        for (name, pixels) in [("menubar-actual@2x.png", 36), ("menubar-zoom.png", 216)] {
+            let size = NSSize(width: CGFloat(pixels) * 2 + 3 * CGFloat(pixels) / 3, height: CGFloat(pixels) * 5 / 3)
+            let image = NSImage(size: size, flipped: false) { _ in
+                let pad = CGFloat(pixels) / 3
+                for (index, dark) in [true, false].enumerated() {
+                    let cell = NSRect(x: CGFloat(index) * (CGFloat(pixels) + pad * 1.5), y: 0, width: CGFloat(pixels) + pad * 1.5, height: size.height)
+                    (dark ? NSColor(white: 0.16, alpha: 1) : NSColor(white: 0.93, alpha: 1)).setFill()
+                    cell.fill()
+                    let glyph = NSImage(size: NSSize(width: pixels, height: pixels), flipped: false) { rect in
+                        MenuBarIcon.draw(in: rect)
+                        (dark ? NSColor.white : NSColor.black).setFill()
+                        rect.fill(using: .sourceIn)
+                        return true
+                    }
+                    glyph.draw(in: NSRect(x: cell.minX + pad * 0.75, y: pad, width: CGFloat(pixels), height: CGFloat(pixels)))
+                }
+                return true
+            }
+            guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { continue }
+            try? rep.representation(using: .png, properties: [:])?.write(to: directory.appendingPathComponent(name))
+        }
     }
 
     private static func sampleImage(aspect: CGFloat, hue: CGFloat) -> NSImage {

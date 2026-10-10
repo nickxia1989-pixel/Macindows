@@ -1,6 +1,6 @@
 import AppKit
 import ApplicationServices
-import HorizonCore
+import MacindowsCore
 
 /// 某个 App 的一个标准窗口
 struct AppWindow {

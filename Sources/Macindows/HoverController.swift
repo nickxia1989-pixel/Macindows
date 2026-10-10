@@ -1,5 +1,5 @@
 import AppKit
-import HorizonCore
+import MacindowsCore
 
 /// 跟踪鼠标在程序坞上的位置，决定悬停窗何时出现、显示什么、何时消失。
 final class HoverController {

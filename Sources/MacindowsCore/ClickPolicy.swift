@@ -1,4 +1,4 @@
-/// 点击程序坞里某个 App 图标时，Horizon 该怎么处理这次点击。
+/// 点击程序坞里某个 App 图标时，Macindows 该怎么处理这次点击。
 public enum DockClickAction: Equatable {
     /// 不干预，交给程序坞按系统原样处理
     case passThrough

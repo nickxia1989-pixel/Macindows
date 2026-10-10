@@ -2,13 +2,13 @@
 import PackageDescription
 
 let package = Package(
-    name: "Horizon",
+    name: "Macindows",
     platforms: [.macOS("26.0")],
     targets: [
         // 纯逻辑，不碰系统接口，可以单元测试
-        .target(name: "HorizonCore", path: "Sources/HorizonCore"),
-        .executableTarget(name: "Horizon", dependencies: ["HorizonCore"], path: "Sources/Horizon"),
-        .testTarget(name: "HorizonCoreTests", dependencies: ["HorizonCore"], path: "Tests/HorizonCoreTests"),
+        .target(name: "MacindowsCore", path: "Sources/MacindowsCore"),
+        .executableTarget(name: "Macindows", dependencies: ["MacindowsCore"], path: "Sources/Macindows"),
+        .testTarget(name: "MacindowsCoreTests", dependencies: ["MacindowsCore"], path: "Tests/MacindowsCoreTests"),
     ],
     swiftLanguageModes: [.v5]
 )

@@ -1,10 +1,10 @@
 import Foundation
 
-/// 写到 ~/Library/Logs/Horizon/horizon.log。应用没有主窗口，出问题时靠它排查。
+/// 写到 ~/Library/Logs/Macindows/macindows.log。应用没有主窗口，出问题时靠它排查。
 enum Log {
-    static let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Horizon", isDirectory: true)
-    static let url = directory.appendingPathComponent("horizon.log")
-    private static let queue = DispatchQueue(label: "horizon.log")
+    static let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Macindows", isDirectory: true)
+    static let url = directory.appendingPathComponent("macindows.log")
+    private static let queue = DispatchQueue(label: "macindows.log")
     private static let formatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "MM-dd HH:mm:ss.SSS"
@@ -15,7 +15,7 @@ enum Log {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         // 超过 512KB 就把旧的挪走，只保留一份
         if let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int, size > 512 * 1024 {
-            let old = directory.appendingPathComponent("horizon.old.log")
+            let old = directory.appendingPathComponent("macindows.old.log")
             try? FileManager.default.removeItem(at: old)
             try? FileManager.default.moveItem(at: url, to: old)
         }

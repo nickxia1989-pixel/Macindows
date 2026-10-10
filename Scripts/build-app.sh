@@ -1,19 +1,20 @@
 #!/bin/bash
-# 编译并打包成 build/Horizon.app。
+# 编译并打包成 build/Macindows.app。
 # 用固定的开发者证书签名：系统按签名身份记住「辅助功能」授权，换成临时签名的话每次重编都要重新授权。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CONFIG="${CONFIG:-release}"
-APP="build/Horizon.app"
+APP="build/Macindows.app"
 
 swift build -c "$CONFIG"
-BIN="$(swift build -c "$CONFIG" --show-bin-path)/Horizon"
+BIN="$(swift build -c "$CONFIG" --show-bin-path)/Macindows"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/Horizon"
+cp "$BIN" "$APP/Contents/MacOS/Macindows"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 IDENTITY="${CODESIGN_IDENTITY:-$(security find-identity -v -p codesigning | awk -F'"' '/Apple Development|Developer ID Application/ {print $2; exit}')}"
 if [ -n "$IDENTITY" ]; then

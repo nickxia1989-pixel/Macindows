@@ -1,6 +1,6 @@
 import AppKit
 import ApplicationServices
-import HorizonCore
+import MacindowsCore
 
 /// 程序坞里的一个图标。frame 是左上角为原点的全局坐标。
 struct DockItem {

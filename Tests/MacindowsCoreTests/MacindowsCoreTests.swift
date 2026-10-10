@@ -1,5 +1,5 @@
 import XCTest
-@testable import HorizonCore
+@testable import MacindowsCore
 
 final class ClickPolicyTests: XCTestCase {
     private func state(running: Bool = true, front: Bool = false, hidden: Bool = false, windows: Int, minimized: Int = 0) -> AppWindowState {

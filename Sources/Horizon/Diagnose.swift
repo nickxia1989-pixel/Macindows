@@ -58,8 +58,8 @@ enum Diagnose {
     }
 }
 
-/// `Horizon --selftest`：在 Horizon 正常运行时，模拟一次「鼠标停到程序坞图标上」，检查窗口列表会不会弹出。
-/// 会把鼠标移到程序坞上约 1 秒再移回原处，不点击任何东西。结果写到日志目录的 selftest.txt。
+/// `Horizon --selftest`：在 Horizon 正常运行时模拟几次鼠标移动，检查悬停相关的行为。
+/// 会把鼠标在程序坞附近移动约 5 秒再移回原处，不点击任何东西。结果写到日志目录的 selftest.txt。
 enum SelfTest {
     static let url = Log.directory.appendingPathComponent("selftest.txt")
 
@@ -71,38 +71,68 @@ enum SelfTest {
         let dock = DockInspector()
         dock.refresh()
         let items = dock.allItems().filter(\.isApplication)
-        guard let target = items.first(where: { item in
-            guard let app = item.runningApp, let snapshot = WindowIndex.snapshot(of: app) else { return false }
-            return !snapshot.windows.isEmpty
-        }) else {
+        func windowCount(_ item: DockItem) -> Int { item.runningApp.flatMap { WindowIndex.snapshot(of: $0) }?.windows.count ?? 0 }
+        guard let target = items.first(where: { windowCount($0) > 0 }) else {
             lines.append("程序坞里没有带窗口的 App，无法自检")
             return
         }
+        let windowless = items.first { windowCount($0) == 0 && abs($0.frame.midX - target.frame.midX) + abs($0.frame.midY - target.frame.midY) > 100 }
+
         func move(_ point: CGPoint) {
             CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
         }
         func spin(_ seconds: TimeInterval) { RunLoop.current.run(until: Date().addingTimeInterval(seconds)) }
-        func logSize() -> UInt64 { ((try? FileManager.default.attributesOfItem(atPath: Log.url.path))?[.size] as? UInt64) ?? 0 }
+        func hover(_ item: DockItem) {
+            move(CGPoint(x: item.frame.midX, y: item.frame.midY)); spin(0.08)
+            move(CGPoint(x: item.frame.midX + 2, y: item.frame.midY + 1))
+        }
+        /// 正在运行的那个 Horizon 的悬停窗在屏幕上的位置（左上角为原点）；没显示则为 nil
+        func panelFrame() -> CGRect? {
+            let me = ProcessInfo.processInfo.processIdentifier
+            let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+            for window in info where (window[kCGWindowOwnerName as String] as? String) == "Horizon" {
+                guard (window[kCGWindowOwnerPID as String] as? Int32) != me, (window[kCGWindowLayer as String] as? Int) == Int(CGWindowLevelForKey(.popUpMenuWindow)),
+                      let bounds = window[kCGWindowBounds as String] as? [String: Any], let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { continue }
+                return rect
+            }
+            return nil
+        }
 
         let origin = CGEvent(source: nil)?.location ?? .zero
         let horizontal = dock.frame.width >= dock.frame.height
-        let outside = horizontal ? CGPoint(x: target.frame.midX, y: dock.frame.minY - 240)
-                                 : CGPoint(x: dock.frame.midX < 400 ? dock.frame.maxX + 240 : dock.frame.minX - 240, y: target.frame.midY)
-        let before = logSize()
-        move(outside); spin(0.3)
-        move(CGPoint(x: target.frame.midX, y: target.frame.midY)); spin(0.1)
-        move(CGPoint(x: target.frame.midX + 2, y: target.frame.midY + 1)); spin(1.0)
+        let onLeft = dock.frame.midX < 400
+        let outside = horizontal ? CGPoint(x: target.frame.midX, y: dock.frame.minY - 400)
+                                 : CGPoint(x: onLeft ? dock.frame.maxX + 500 : dock.frame.minX - 500, y: target.frame.midY)
 
-        var appended = ""
-        if let handle = try? FileHandle(forReadingFrom: Log.url) {
-            try? handle.seek(toOffset: before)
-            appended = String(data: handle.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            try? handle.close()
+        move(outside); spin(0.3)
+        hover(target); spin(0.9)
+        guard let panel = panelFrame() else {
+            lines.append("窗口列表: 没有弹出")
+            move(origin); return
         }
-        lines.append("Horizon 的窗口列表: " + (appended.contains("show windows of \(target.title)") ? "已弹出" : "没有弹出"))
+        let gap = horizontal ? dock.frame.minY - panel.maxY : (onLeft ? panel.minX - dock.frame.maxX : dock.frame.minX - panel.maxX)
+        lines.append("窗口列表: 已弹出，离程序坞 \(Int(gap.rounded())) 点（系统的名称气泡占其中约 30 点）")
+
+        // 停在列表和程序坞之间的空隙里，超过关闭延时也不应该关
+        let inGap = horizontal ? CGPoint(x: target.frame.midX, y: dock.frame.minY - gap / 2)
+                               : CGPoint(x: onLeft ? dock.frame.maxX + gap / 2 : dock.frame.minX - gap / 2, y: target.frame.midY)
+        move(inGap); spin(0.05); move(CGPoint(x: inGap.x + 1, y: inGap.y)); spin(0.8)
+        lines.append("鼠标停在空隙里 0.8 秒: " + (panelFrame() != nil ? "列表保持显示" : "列表被关掉了"))
+        move(CGPoint(x: panel.midX, y: panel.midY)); spin(0.05); move(CGPoint(x: panel.midX + 1, y: panel.midY)); spin(0.6)
+        lines.append("鼠标移进列表: " + (panelFrame() != nil ? "列表保持显示" : "列表被关掉了"))
+
+        // 列表开着时移到一个没有窗口的 App 上，旧列表应该自己关掉
+        if let windowless {
+            hover(target); spin(0.4)
+            hover(windowless); spin(0.2)
+            move(CGPoint(x: windowless.frame.midX - 2, y: windowless.frame.midY)); spin(0.7)
+            lines.append("移到没有窗口的 App 上: " + (panelFrame() == nil ? "旧列表已关闭" : "旧列表还开着"))
+        } else {
+            lines.append("程序坞里没有不带窗口的 App，跳过这一项")
+        }
 
         move(outside); spin(0.4)
+        lines.append("鼠标移开后: " + (panelFrame() == nil ? "列表已关闭" : "列表还开着"))
         move(origin); spin(0.1)
-        lines.append("鼠标已移回原处")
     }
 }

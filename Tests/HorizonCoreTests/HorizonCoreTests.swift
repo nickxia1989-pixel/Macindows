@@ -71,4 +71,32 @@ final class GeometryTests: XCTestCase {
                                    dockFrame: dock, edge: .bottom, visibleFrame: visible)
         XCTAssertEqual(leftmost.x, 6)
     }
+
+    func testCorridorBridgesTheGapAboveABottomDock() {
+        let dock = CGRect(x: 800, y: 0, width: 900, height: 89)
+        let item = CGRect(x: 820, y: 8, width: 60, height: 76)
+        let panel = CGRect(x: 650, y: 125, width: 400, height: 160)
+        let gap = corridor(panelFrame: panel, itemFrame: item, dockFrame: dock, edge: .bottom)
+        XCTAssertEqual(gap, CGRect(x: 650, y: 89, width: 400, height: 36))
+        // 从图标正上方移向悬停窗的路径都在空隙里
+        XCTAssertTrue(gap.contains(CGPoint(x: item.midX, y: 100)))
+        XCTAssertFalse(gap.contains(CGPoint(x: 600, y: 100)))
+    }
+
+    func testCorridorCoversTheIconWhenThePanelIsPushedAside() {
+        // 最左边的图标：悬停窗被屏幕边缘挤到右边，空隙仍要盖住图标正上方
+        let dock = CGRect(x: 0, y: 0, width: 900, height: 89)
+        let item = CGRect(x: 2, y: 8, width: 60, height: 76)
+        let panel = CGRect(x: 40, y: 125, width: 300, height: 160)
+        let gap = corridor(panelFrame: panel, itemFrame: item, dockFrame: dock, edge: .bottom)
+        XCTAssertEqual(gap.minX, 2)
+        XCTAssertEqual(gap.maxX, 340)
+    }
+
+    func testCorridorBesideALeftDock() {
+        let dock = CGRect(x: 0, y: 400, width: 59, height: 600)
+        let item = CGRect(x: 6, y: 900, width: 46, height: 46)
+        let panel = CGRect(x: 200, y: 823, width: 300, height: 200)
+        XCTAssertEqual(corridor(panelFrame: panel, itemFrame: item, dockFrame: dock, edge: .left), CGRect(x: 59, y: 823, width: 141, height: 200))
+    }
 }

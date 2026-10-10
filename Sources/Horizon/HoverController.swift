@@ -19,6 +19,8 @@ final class HoverController {
     private var monitors: [Any] = []
     private var lastMove: TimeInterval = 0
     private var captureGeneration = 0
+    /// 窗口列表和程序坞之间的空隙（AppKit 坐标）。鼠标从图标移向列表时经过这里，不算离开
+    private var bridge = CGRect.null
     /// 最近截到的画面。窗口最小化或隐藏后截不到新的，就用它
     private var thumbnailCache: [CGWindowID: NSImage] = [:]
 
@@ -62,8 +64,8 @@ final class HoverController {
         guard now - lastMove >= 0.016 else { return }
         lastMove = now
 
-        // 鼠标已经移进窗口列表：保持显示
-        if panel.isVisible, panel.frame.insetBy(dx: -4, dy: -4).contains(location) {
+        // 鼠标已经移进窗口列表，或正在从图标移向它的路上：保持显示
+        if panel.isVisible, panel.frame.insetBy(dx: -4, dy: -4).contains(location) || bridge.contains(location) {
             cancelHide()
             return
         }
@@ -72,7 +74,8 @@ final class HoverController {
 
         let item = dock.item(at: point).flatMap { $0.isApplication ? $0 : nil }
         if let item, item.isSame(as: hovered) {
-            cancelHide()
+            // 只有鼠标停在「正在显示窗口列表的那个图标」上才续命；停在别的没有窗口的图标上，旧列表照常关闭
+            if item.isSame(as: shown?.item) { cancelHide() }
             return
         }
         guard item != nil || hovered != nil else { return }
@@ -153,6 +156,7 @@ final class HoverController {
         shown = nil
         signature = ""
         captureGeneration += 1
+        bridge = .null
         if panel.isVisible { panel.orderOut(nil) }
     }
 
@@ -194,8 +198,9 @@ final class HoverController {
         guard let layout = layout(for: item) else { return }
         let size = panel.render(entries: list, thumbnails: showsThumbnails, placeholder: app.icon, maxSize: layout.maxSize)
         let origin = panelOrigin(panelSize: size, itemFrame: layout.itemFrame, dockFrame: layout.dockFrame,
-                                 edge: layout.edge, visibleFrame: layout.visible)
+                                 edge: layout.edge, visibleFrame: layout.visible, gap: layout.gap)
         panel.setFrameOrigin(origin)
+        bridge = corridor(panelFrame: NSRect(origin: origin, size: size), itemFrame: layout.itemFrame, dockFrame: layout.dockFrame, edge: layout.edge)
     }
 
     private static func signature(of entries: [PreviewEntry]) -> String {
@@ -203,7 +208,20 @@ final class HoverController {
     }
 
     /// 程序坞贴在哪条边、它占掉的范围，以及窗口列表最大能有多大。全部是 AppKit 坐标。
-    private func layout(for item: DockItem) -> (edge: DockEdge, itemFrame: CGRect, dockFrame: CGRect, visible: CGRect, maxSize: CGSize)? {
+    /// 程序坞自带的名称气泡紧贴在图标外侧，窗口列表要让到它外面，两者才不会叠在一起。
+    /// 气泡的尺寸是实测的：高约 30 点；宽度是名称的文字宽度加两侧各约 15 点。
+    private func labelClearance(for item: DockItem, edge: DockEdge) -> CGFloat {
+        let spacing: CGFloat = 6
+        switch edge {
+        case .bottom:
+            return 30 + spacing
+        case .left, .right:
+            let text = (item.title as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 13, weight: .medium)]).width
+            return text.rounded(.up) + 32 + spacing
+        }
+    }
+
+    private func layout(for item: DockItem) -> (edge: DockEdge, itemFrame: CGRect, dockFrame: CGRect, visible: CGRect, maxSize: CGSize, gap: CGFloat)? {
         let height = primaryScreenHeight
         let itemFrame = cocoaRect(fromTopLeft: item.frame, primaryHeight: height)
         var dockFrame = cocoaRect(fromTopLeft: dock.frame.isNull ? item.frame : dock.frame, primaryHeight: height)
@@ -212,20 +230,21 @@ final class HoverController {
         // 程序坞的玻璃底板比图标区域略宽，以系统为它留出的那条边为准，窗口列表才不会压在上面
         let visible = screen.visibleFrame
         let margin: CGFloat = 12
+        let gap = labelClearance(for: item, edge: edge)
         var maxSize = CGSize(width: visible.width - margin * 2, height: visible.height - margin * 2)
         switch edge {
         case .left:
             dockFrame.size.width = max(dockFrame.maxX, visible.minX) - dockFrame.minX
-            maxSize.width = visible.maxX - dockFrame.maxX - 8 - margin
+            maxSize.width = visible.maxX - dockFrame.maxX - gap - margin
         case .right:
             let left = min(dockFrame.minX, visible.maxX)
             dockFrame = CGRect(x: left, y: dockFrame.minY, width: dockFrame.maxX - left, height: dockFrame.height)
-            maxSize.width = dockFrame.minX - 8 - visible.minX - margin
+            maxSize.width = dockFrame.minX - gap - visible.minX - margin
         case .bottom:
             dockFrame.size.height = max(dockFrame.maxY, visible.minY) - dockFrame.minY
-            maxSize.height = visible.maxY - dockFrame.maxY - 8 - margin
+            maxSize.height = visible.maxY - dockFrame.maxY - gap - margin
         }
-        return (edge, itemFrame, dockFrame, visible, maxSize)
+        return (edge, itemFrame, dockFrame, visible, maxSize, gap)
     }
 
     /// 窗口列表开着的时候每秒看一眼：窗口开了、关了、改了标题就跟着更新

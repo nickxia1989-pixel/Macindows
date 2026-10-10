@@ -43,3 +43,19 @@ public func panelOrigin(panelSize: CGSize, itemFrame: CGRect, dockFrame: CGRect,
     if edge == .bottom { y = min(y, maxY) }
     return CGPoint(x: x.rounded(), y: y.rounded())
 }
+
+/// 悬停窗和程序坞之间的那段空隙（AppKit 坐标）。鼠标从图标移向悬停窗时要穿过这里，期间悬停窗不能关。
+/// 沿程序坞方向取悬停窗和图标两者的并集，这样悬停窗被屏幕边缘挤偏时，从图标直着移过去也不会出界。
+public func corridor(panelFrame: CGRect, itemFrame: CGRect, dockFrame: CGRect, edge: DockEdge) -> CGRect {
+    switch edge {
+    case .bottom:
+        let minX = min(panelFrame.minX, itemFrame.minX), maxX = max(panelFrame.maxX, itemFrame.maxX)
+        return CGRect(x: minX, y: dockFrame.maxY, width: maxX - minX, height: max(0, panelFrame.minY - dockFrame.maxY))
+    case .left:
+        let minY = min(panelFrame.minY, itemFrame.minY), maxY = max(panelFrame.maxY, itemFrame.maxY)
+        return CGRect(x: dockFrame.maxX, y: minY, width: max(0, panelFrame.minX - dockFrame.maxX), height: maxY - minY)
+    case .right:
+        let minY = min(panelFrame.minY, itemFrame.minY), maxY = max(panelFrame.maxY, itemFrame.maxY)
+        return CGRect(x: panelFrame.maxX, y: minY, width: max(0, dockFrame.minX - panelFrame.maxX), height: maxY - minY)
+    }
+}

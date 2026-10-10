@@ -87,7 +87,7 @@ final class HoverController {
         lastMove = now
 
         // 鼠标已经移进悬停窗，或正在从图标移向它的路上：保持显示
-        if panel.isVisible, panel.frame.insetBy(dx: -4, dy: -4).contains(location) || bridge.contains(location) {
+        if panel.isVisible, panel.cardFrame.insetBy(dx: -4, dy: -4).contains(location) || bridge.contains(location) {
             cancelHide()
             return
         }
@@ -238,7 +238,7 @@ final class HoverController {
     private func place(_ size: NSSize, _ layout: Layout) {
         let origin = panelOrigin(panelSize: size, itemFrame: layout.itemFrame, dockFrame: layout.dockFrame,
                                  edge: layout.edge, visibleFrame: layout.visible, gap: layout.gap)
-        panel.setFrameOrigin(origin)
+        panel.setCardOrigin(origin)
         bridge = corridor(panelFrame: NSRect(origin: origin, size: size), itemFrame: layout.itemFrame, dockFrame: layout.dockFrame, edge: layout.edge)
     }
 

@@ -166,7 +166,7 @@ final class PillView: NSView {
 
 /// App 还在运行、但一个窗口都没开时显示的一行：点这一行让它开一个窗口，点右边的按钮退出它。
 final class EmptyStateView: NSView {
-    static let message = "没有打开的窗口"
+    static let message = "点击打开新窗口"
     static let quitTitle = "退出"
     static let messageFont = NSFont.systemFont(ofSize: 13)
     static let quitFont = NSFont.systemFont(ofSize: 12, weight: .medium)
@@ -370,11 +370,16 @@ final class PreviewContentView: NSView {
 
 /// 叠在程序坞旁边的独立浮窗。不抢焦点，不出现在调度中心和窗口切换里。
 final class PreviewPanel: NSPanel {
+    /// 玻璃四周留出的透明边，用来画阴影
+    static let margin: CGFloat = 28
+
     let content = PreviewContentView()
     private let glass = NSGlassEffectView()
+    private let root = NSView()
+    private let shadowLayer = CALayer()
+    private let shadowMask = CAShapeLayer()
 
     init() {
-        glass.cornerRadius = 14
         glass.contentView = content
         super.init(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         isFloatingPanel = true
@@ -383,29 +388,66 @@ final class PreviewPanel: NSPanel {
         level = .popUpMenu
         backgroundColor = .clear
         isOpaque = false
-        hasShadow = true
+        // 不用窗口自带的阴影：它会沿着形状描一圈生硬的深色细线。改为自己画一层柔和的
+        hasShadow = false
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
         animationBehavior = .none
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
-        contentView = glass
+        root.wantsLayer = true
+        shadowLayer.shadowColor = NSColor.black.cgColor
+        shadowLayer.shadowOpacity = 0.3
+        shadowLayer.shadowRadius = 9
+        shadowLayer.shadowOffset = CGSize(width: 0, height: -3)
+        // 只留玻璃外面的那一圈：玻璃是半透明的，阴影垫在它底下会把它整体压暗
+        shadowMask.fillRule = .evenOdd
+        shadowLayer.mask = shadowMask
+        root.layer?.addSublayer(shadowLayer)
+        root.addSubview(glass)
+        contentView = root
     }
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
     func render(entries: [PreviewEntry], thumbnails: Bool, placeholder: NSImage?, maxSize: CGSize) -> NSSize {
-        apply(content.configure(entries: entries, thumbnails: thumbnails, placeholder: placeholder, maxSize: maxSize))
+        apply(content.configure(entries: entries, thumbnails: thumbnails, placeholder: placeholder, maxSize: maxSize), cornerRadius: 16)
     }
 
+    /// 单行的小卡片做成两头全圆，和系统的名称气泡是同一种形状
     func renderEmpty() -> NSSize {
-        apply(content.configureEmpty())
+        let size = content.configureEmpty()
+        return apply(size, cornerRadius: size.height / 2)
     }
 
-    private func apply(_ size: NSSize) -> NSSize {
-        setContentSize(size)
-        glass.frame = NSRect(origin: .zero, size: size)
+    private func apply(_ size: NSSize, cornerRadius: CGFloat) -> NSSize {
+        let margin = Self.margin
+        let bounds = NSRect(x: 0, y: 0, width: size.width + margin * 2, height: size.height + margin * 2)
+        let card = NSRect(x: margin, y: margin, width: size.width, height: size.height)
+        setContentSize(bounds.size)
+        root.frame = bounds
+        glass.cornerRadius = cornerRadius
+        glass.frame = card
         content.frame = NSRect(origin: .zero, size: size)
+
+        let outline = CGPath(roundedRect: card, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
+        let outside = CGMutablePath()
+        outside.addRect(bounds)
+        outside.addPath(outline)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        shadowLayer.frame = bounds
+        shadowLayer.shadowPath = outline
+        shadowMask.frame = bounds
+        shadowMask.path = outside
+        CATransaction.commit()
         return size
+    }
+
+    /// 玻璃卡片本身在屏幕上的位置（不含四周的透明边）
+    var cardFrame: NSRect { frame.insetBy(dx: Self.margin, dy: Self.margin) }
+
+    func setCardOrigin(_ origin: NSPoint) {
+        setFrameOrigin(NSPoint(x: origin.x - Self.margin, y: origin.y - Self.margin))
     }
 }

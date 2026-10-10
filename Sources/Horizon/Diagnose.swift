@@ -96,7 +96,7 @@ enum SelfTest {
             for window in info where (window[kCGWindowOwnerName as String] as? String) == "Horizon" {
                 guard (window[kCGWindowOwnerPID as String] as? Int32) != me, (window[kCGWindowLayer as String] as? Int) == Int(CGWindowLevelForKey(.popUpMenuWindow)),
                       let bounds = window[kCGWindowBounds as String] as? [String: Any], let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { continue }
-                return rect
+                return rect.insetBy(dx: PreviewPanel.margin, dy: PreviewPanel.margin)
             }
             return nil
         }

@@ -1,7 +1,7 @@
 import AppKit
 import HorizonCore
 
-/// 跟踪鼠标在程序坞上的位置，决定窗口列表何时出现、显示什么、何时消失。
+/// 跟踪鼠标在程序坞上的位置，决定悬停窗何时出现、显示什么、何时消失。
 final class HoverController {
     let dock = DockInspector()
     /// 鼠标拖动时通知点击拦截器（用来区分「点击」和「拖图标」）
@@ -9,9 +9,29 @@ final class HoverController {
     var isEnabled = true { didSet { if !isEnabled { hide() } } }
     var wantsThumbnails = false
 
+    /// 悬停窗当前显示的内容
+    private enum Shown {
+        /// 一个 App 的窗口列表
+        case windows(DockItem, NSRunningApplication, AppSnapshot)
+        /// App 在运行但没有窗口：一行提示，可以打开窗口或退出
+        case empty(DockItem, NSRunningApplication)
+
+        var item: DockItem {
+            switch self {
+            case .windows(let item, _, _), .empty(let item, _): return item
+            }
+        }
+
+        var app: NSRunningApplication {
+            switch self {
+            case .windows(_, let app, _), .empty(_, let app): return app
+            }
+        }
+    }
+
     private let panel = PreviewPanel()
     private var hovered: DockItem?
-    private var shown: (item: DockItem, app: NSRunningApplication, snapshot: AppSnapshot)?
+    private var shown: Shown?
     private var signature = ""
     private var showTimer: Timer?
     private var hideTimer: Timer?
@@ -19,7 +39,7 @@ final class HoverController {
     private var monitors: [Any] = []
     private var lastMove: TimeInterval = 0
     private var captureGeneration = 0
-    /// 窗口列表和程序坞之间的空隙（AppKit 坐标）。鼠标从图标移向列表时经过这里，不算离开
+    /// 悬停窗和程序坞之间的空隙（AppKit 坐标）。鼠标从图标移向悬停窗时经过这里，不算离开
     private var bridge = CGRect.null
     /// 最近截到的画面。窗口最小化或隐藏后截不到新的，就用它
     private var thumbnailCache: [CGWindowID: NSImage] = [:]
@@ -41,6 +61,8 @@ final class HoverController {
         }
         panel.content.onSelect = { [weak self] in self?.select($0) }
         panel.content.onClose = { [weak self] in self?.close($0) }
+        panel.content.onOpen = { [weak self] in self?.openWindow() }
+        panel.content.onQuit = { [weak self] in self?.quit() }
     }
 
     func stop() {
@@ -55,7 +77,7 @@ final class HoverController {
         let location = NSEvent.mouseLocation
         let point = topLeftPoint(fromCocoa: location, primaryHeight: primaryScreenHeight)
         if event.type == .leftMouseDragged {
-            // 拖着东西经过程序坞时不弹窗口列表
+            // 拖着东西经过程序坞时不弹悬停窗
             onDrag?(point)
             return
         }
@@ -64,7 +86,7 @@ final class HoverController {
         guard now - lastMove >= 0.016 else { return }
         lastMove = now
 
-        // 鼠标已经移进窗口列表，或正在从图标移向它的路上：保持显示
+        // 鼠标已经移进悬停窗，或正在从图标移向它的路上：保持显示
         if panel.isVisible, panel.frame.insetBy(dx: -4, dy: -4).contains(location) || bridge.contains(location) {
             cancelHide()
             return
@@ -74,24 +96,25 @@ final class HoverController {
 
         let item = dock.item(at: point).flatMap { $0.isApplication ? $0 : nil }
         if let item, item.isSame(as: hovered) {
-            // 只有鼠标停在「正在显示窗口列表的那个图标」上才续命；停在别的没有窗口的图标上，旧列表照常关闭
+            // 只有鼠标停在「悬停窗所属的那个图标」上才续命；停在别的没有内容可显示的图标上，旧的悬停窗照常关闭
             if item.isSame(as: shown?.item) { cancelHide() }
             return
         }
         guard item != nil || hovered != nil else { return }
         hovered = item
         showTimer?.invalidate()
-        guard let item, let app = item.runningApp, let snapshot = WindowIndex.snapshot(of: app), !snapshot.windows.isEmpty else {
+        // 没在运行的 App 没什么可显示的，交给程序坞自己的名称气泡
+        guard let item, let app = item.runningApp, let snapshot = WindowIndex.snapshot(of: app) else {
             scheduleHide()
             return
         }
         cancelHide()
         if panel.isVisible {
-            show(item, app: app, snapshot: snapshot)
+            present(item, app: app, snapshot: snapshot)
         } else {
             showTimer = timer(showDelay) { [weak self] in
                 guard let self, item.isSame(as: self.hovered) else { return }
-                self.show(item, app: app, snapshot: WindowIndex.snapshot(of: app) ?? snapshot)
+                self.present(item, app: app, snapshot: WindowIndex.snapshot(of: app) ?? snapshot)
             }
         }
     }
@@ -108,34 +131,42 @@ final class HoverController {
         showTimer?.invalidate()
         cancelHide()
         hovered = item
-        if let snapshot = WindowIndex.snapshot(of: app), !snapshot.windows.isEmpty {
-            show(item, app: app, snapshot: snapshot)
-        }
+        if let snapshot = WindowIndex.snapshot(of: app) { present(item, app: app, snapshot: snapshot) }
     }
 
-    /// 一次点击被原样交给了程序坞（切换、还原之类）：收起窗口列表，和 Windows 的习惯一致
+    /// 一次点击被原样交给了程序坞（切换、还原之类）：收起悬停窗，和 Windows 的习惯一致
     func dockClickPassedThrough() {
         showTimer?.invalidate()
         hide()
     }
 
-    private func show(_ item: DockItem, app: NSRunningApplication, snapshot: AppSnapshot) {
-        guard isEnabled, !snapshot.windows.isEmpty else {
+    private func present(_ item: DockItem, app: NSRunningApplication, snapshot: AppSnapshot) {
+        guard isEnabled, !app.isTerminated else {
             hide()
             return
         }
-        if !item.isSame(as: shown?.item) {
-            log("show windows of \(item.title): \(snapshot.windows.count) thumbnails=\(showsThumbnails)")
+        if snapshot.windows.isEmpty {
+            if case .empty(let current, _)? = shown, current.isSame(as: item) {} else {
+                log("show empty card of \(item.title)")
+            }
+            shown = .empty(item, app)
+            signature = ""
+            captureGeneration += 1
+            if let layout = layout(for: item) { place(panel.renderEmpty(), layout) }
+        } else {
+            if case .windows(let current, _, _)? = shown, current.isSame(as: item) {} else {
+                log("show windows of \(item.title): \(snapshot.windows.count) thumbnails=\(showsThumbnails)")
+            }
+            shown = .windows(item, app, snapshot)
+            render()
+            loadThumbnails()
         }
-        shown = (item, app, snapshot)
-        render()
         reveal()
         if refreshTimer == nil {
             let refresh = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.refresh() }
             RunLoop.main.add(refresh, forMode: .common)
             refreshTimer = refresh
         }
-        loadThumbnails()
     }
 
     private func reveal() {
@@ -191,24 +222,27 @@ final class HoverController {
     }
 
     private func render() {
-        guard let shown else { return }
-        let (item, app, snapshot) = (shown.item, shown.app, shown.snapshot)
+        guard case .windows(let item, let app, let snapshot)? = shown else { return }
         let list = entries(for: snapshot)
         signature = Self.signature(of: list)
         guard let layout = layout(for: item) else { return }
-        let size = panel.render(entries: list, thumbnails: showsThumbnails, placeholder: app.icon, maxSize: layout.maxSize)
-        let origin = panelOrigin(panelSize: size, itemFrame: layout.itemFrame, dockFrame: layout.dockFrame,
-                                 edge: layout.edge, visibleFrame: layout.visible, gap: layout.gap)
-        panel.setFrameOrigin(origin)
-        bridge = corridor(panelFrame: NSRect(origin: origin, size: size), itemFrame: layout.itemFrame, dockFrame: layout.dockFrame, edge: layout.edge)
+        place(panel.render(entries: list, thumbnails: showsThumbnails, placeholder: app.icon, maxSize: layout.maxSize), layout)
     }
 
     private static func signature(of entries: [PreviewEntry]) -> String {
         entries.map { "\($0.title)|\($0.isCurrent)" }.joined(separator: "\n")
     }
 
-    /// 程序坞贴在哪条边、它占掉的范围，以及窗口列表最大能有多大。全部是 AppKit 坐标。
-    /// 程序坞自带的名称气泡紧贴在图标外侧，窗口列表要让到它外面，两者才不会叠在一起。
+    private typealias Layout = (edge: DockEdge, itemFrame: CGRect, dockFrame: CGRect, visible: CGRect, maxSize: CGSize, gap: CGFloat)
+
+    private func place(_ size: NSSize, _ layout: Layout) {
+        let origin = panelOrigin(panelSize: size, itemFrame: layout.itemFrame, dockFrame: layout.dockFrame,
+                                 edge: layout.edge, visibleFrame: layout.visible, gap: layout.gap)
+        panel.setFrameOrigin(origin)
+        bridge = corridor(panelFrame: NSRect(origin: origin, size: size), itemFrame: layout.itemFrame, dockFrame: layout.dockFrame, edge: layout.edge)
+    }
+
+    /// 程序坞自带的名称气泡紧贴在图标外侧，悬停窗要让到它外面，两者才不会叠在一起。
     /// 气泡的尺寸是实测的：高约 30 点；宽度是名称的文字宽度加两侧各约 15 点。
     private func labelClearance(for item: DockItem, edge: DockEdge) -> CGFloat {
         let spacing: CGFloat = 6
@@ -221,13 +255,14 @@ final class HoverController {
         }
     }
 
-    private func layout(for item: DockItem) -> (edge: DockEdge, itemFrame: CGRect, dockFrame: CGRect, visible: CGRect, maxSize: CGSize, gap: CGFloat)? {
+    /// 程序坞贴在哪条边、它占掉的范围，以及悬停窗最大能有多大。全部是 AppKit 坐标。
+    private func layout(for item: DockItem) -> Layout? {
         let height = primaryScreenHeight
         let itemFrame = cocoaRect(fromTopLeft: item.frame, primaryHeight: height)
         var dockFrame = cocoaRect(fromTopLeft: dock.frame.isNull ? item.frame : dock.frame, primaryHeight: height)
         guard let screen = NSScreen.screens.first(where: { $0.frame.intersects(itemFrame) }) ?? NSScreen.main else { return nil }
         let edge = dockEdge(dockFrame: dockFrame, screenFrame: screen.frame)
-        // 程序坞的玻璃底板比图标区域略宽，以系统为它留出的那条边为准，窗口列表才不会压在上面
+        // 程序坞的玻璃底板比图标区域略宽，以系统为它留出的那条边为准，悬停窗才不会压在上面
         let visible = screen.visibleFrame
         let margin: CGFloat = 12
         let gap = labelClearance(for: item, edge: edge)
@@ -247,22 +282,32 @@ final class HoverController {
         return (edge, itemFrame, dockFrame, visible, maxSize, gap)
     }
 
-    /// 窗口列表开着的时候每秒看一眼：窗口开了、关了、改了标题就跟着更新
+    /// 悬停窗开着的时候每秒看一眼：窗口开了、关了、改了标题，或者 App 退出了，就跟着更新
     private func refresh() {
         guard let current = shown else { return }
-        guard let snapshot = WindowIndex.snapshot(of: current.app), !snapshot.windows.isEmpty else {
+        guard !current.app.isTerminated, let snapshot = WindowIndex.snapshot(of: current.app) else {
             hide()
             return
         }
-        shown = (current.item, current.app, snapshot)
-        if Self.signature(of: entries(for: snapshot)) != signature {
-            render()
-            loadThumbnails()
+        switch current {
+        case .empty(let item, let app):
+            if !snapshot.windows.isEmpty { present(item, app: app, snapshot: snapshot) }
+        case .windows(let item, let app, _):
+            if snapshot.windows.isEmpty {
+                // 最后一个窗口刚被关掉：换成「没有打开的窗口」那一行
+                present(item, app: app, snapshot: snapshot)
+            } else {
+                shown = .windows(item, app, snapshot)
+                if Self.signature(of: entries(for: snapshot)) != signature {
+                    render()
+                    loadThumbnails()
+                }
+            }
         }
     }
 
     private func loadThumbnails() {
-        guard showsThumbnails, let snapshot = shown?.snapshot else { return }
+        guard showsThumbnails, case .windows(_, _, let snapshot)? = shown else { return }
         let ids = snapshot.windows.compactMap(\.id)
         guard !ids.isEmpty else { return }
         captureGeneration += 1
@@ -279,17 +324,35 @@ final class HoverController {
     // MARK: 操作
 
     private func select(_ index: Int) {
-        guard let current = shown, current.snapshot.windows.indices.contains(index) else { return }
-        let (app, window) = (current.app, current.snapshot.windows[index])
+        guard case .windows(_, let app, let snapshot)? = shown, snapshot.windows.indices.contains(index) else { return }
+        let window = snapshot.windows[index]
         hide()
         WindowIndex.focus(window, of: app)
     }
 
     private func close(_ index: Int) {
-        guard let current = shown, current.snapshot.windows.indices.contains(index) else { return }
-        let (app, window) = (current.app, current.snapshot.windows[index])
+        guard case .windows(_, let app, let snapshot)? = shown, snapshot.windows.indices.contains(index) else { return }
+        let window = snapshot.windows[index]
         log("close window \(window.id.map(String.init) ?? "-") of \(app.localizedName ?? "?")")
         WindowIndex.close(window)
         _ = timer(0.3) { [weak self] in self?.refresh() }
+    }
+
+    /// 让一个没有窗口的 App 开一个窗口。直接请程序坞执行它自己的「点击图标」动作，效果和用户亲手点一下完全一样。
+    private func openWindow() {
+        guard case .empty(let item, let app)? = shown else { return }
+        hide()
+        let pressed = item.element.perform(kAXPressAction)
+        log("open window of \(item.title) via dock press=\(pressed)")
+        if !pressed, let url = app.bundleURL {
+            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+        }
+    }
+
+    private func quit() {
+        guard case .empty(let item, let app)? = shown else { return }
+        hide()
+        log("quit \(item.title)")
+        app.terminate()
     }
 }

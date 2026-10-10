@@ -154,7 +154,115 @@ final class PreviewItemView: NSView {
     }
 }
 
-/// 悬停窗的内容：一组窗口。没有标题行，只列窗口。
+/// 圆角底色块。颜色要跟着系统的深浅色外观走，所以放在 updateLayer 里设置。
+final class PillView: NSView {
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.cornerRadius = bounds.height / 2
+        layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.12).cgColor
+    }
+}
+
+/// App 还在运行、但一个窗口都没开时显示的一行：点这一行让它开一个窗口，点右边的按钮退出它。
+final class EmptyStateView: NSView {
+    static let message = "没有打开的窗口"
+    static let quitTitle = "退出"
+    static let messageFont = NSFont.systemFont(ofSize: 13)
+    static let quitFont = NSFont.systemFont(ofSize: 12, weight: .medium)
+
+    var onOpen: (() -> Void)?
+    var onQuit: (() -> Void)?
+
+    private let highlight = NSView()
+    private let icon = NSImageView()
+    private let label = NSTextField(labelWithString: EmptyStateView.message)
+    private let pill = PillView()
+    private let quitButton = FirstMouseButton()
+    private var tracking: NSTrackingArea?
+
+    /// 这一行需要的宽度
+    static var preferredWidth: CGFloat {
+        let text = (message as NSString).size(withAttributes: [.font: messageFont]).width
+        return max(220, (32 + text + 14 + quitWidth + 6).rounded(.up))
+    }
+
+    private static var quitWidth: CGFloat {
+        ((quitTitle as NSString).size(withAttributes: [.font: quitFont]).width + 20).rounded(.up)
+    }
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        highlight.wantsLayer = true
+        highlight.layer?.cornerRadius = 7
+        addSubview(highlight)
+
+        icon.image = NSImage(systemSymbolName: "macwindow.badge.plus", accessibilityDescription: nil)
+        icon.symbolConfiguration = .init(pointSize: 12, weight: .regular)
+        icon.contentTintColor = .secondaryLabelColor
+        addSubview(icon)
+
+        label.font = Self.messageFont
+        label.textColor = .secondaryLabelColor
+        label.lineBreakMode = .byTruncatingTail
+        addSubview(label)
+
+        pill.wantsLayer = true
+        addSubview(pill)
+        quitButton.isBordered = false
+        quitButton.attributedTitle = NSAttributedString(string: Self.quitTitle, attributes: [.font: Self.quitFont, .foregroundColor: NSColor.labelColor])
+        quitButton.toolTip = "退出这个 App"
+        quitButton.target = self
+        quitButton.action = #selector(quitClicked)
+        addSubview(quitButton)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var isFlipped: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func layout() {
+        super.layout()
+        let width = bounds.width, height = bounds.height
+        highlight.frame = bounds.insetBy(dx: 0, dy: 1)
+        icon.frame = NSRect(x: 8, y: (height - 16) / 2, width: 18, height: 16)
+        let quitFrame = NSRect(x: width - Self.quitWidth - 5, y: (height - 20) / 2, width: Self.quitWidth, height: 20)
+        pill.frame = quitFrame
+        quitButton.frame = quitFrame
+        label.frame = NSRect(x: 32, y: (height - 17) / 2, width: max(0, quitFrame.minX - 10 - 32), height: 17)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let hit = super.hitTest(point) else { return nil }
+        return hit === quitButton ? hit : self
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { setHovering(true) }
+    override func mouseExited(with event: NSEvent) { setHovering(false) }
+    override func mouseDown(with event: NSEvent) {}
+
+    override func mouseUp(with event: NSEvent) {
+        if bounds.contains(convert(event.locationInWindow, from: nil)) { onOpen?() }
+    }
+
+    @objc private func quitClicked() { onQuit?() }
+
+    private func setHovering(_ hovering: Bool) {
+        highlight.layer?.backgroundColor = (hovering ? NSColor.labelColor.withAlphaComponent(0.1) : .clear).cgColor
+    }
+}
+
+/// 悬停窗的内容：一组窗口（没有标题行），或者「没有打开的窗口」那一行。
 final class PreviewContentView: NSView {
     static let padding: CGFloat = 6
     static let spacing: CGFloat = 4
@@ -163,6 +271,9 @@ final class PreviewContentView: NSView {
 
     var onSelect: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
+    /// 「没有打开的窗口」那一行被点击 / 它的退出按钮被点击
+    var onOpen: (() -> Void)?
+    var onQuit: (() -> Void)?
     private(set) var items: [PreviewItemView] = []
     private var extras: [NSView] = []
 
@@ -187,6 +298,20 @@ final class PreviewContentView: NSView {
         }
         setFrameSize(result)
         return result
+    }
+
+    @discardableResult
+    func configureEmpty() -> NSSize {
+        reset()
+        let row = EmptyStateView()
+        row.frame = NSRect(x: Self.padding, y: Self.padding, width: EmptyStateView.preferredWidth, height: PreviewItemView.rowHeight)
+        row.onOpen = { [weak self] in self?.onOpen?() }
+        row.onQuit = { [weak self] in self?.onQuit?() }
+        addSubview(row)
+        extras = [row]
+        let size = NSSize(width: row.frame.width + Self.padding * 2, height: PreviewItemView.rowHeight + Self.padding * 2)
+        setFrameSize(size)
+        return size
     }
 
     /// 横向一排，窗口多了就整体缩小；缩到最小还放不下则返回 nil，由调用方改用列表。
@@ -270,7 +395,14 @@ final class PreviewPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     func render(entries: [PreviewEntry], thumbnails: Bool, placeholder: NSImage?, maxSize: CGSize) -> NSSize {
-        let size = content.configure(entries: entries, thumbnails: thumbnails, placeholder: placeholder, maxSize: maxSize)
+        apply(content.configure(entries: entries, thumbnails: thumbnails, placeholder: placeholder, maxSize: maxSize))
+    }
+
+    func renderEmpty() -> NSSize {
+        apply(content.configureEmpty())
+    }
+
+    private func apply(_ size: NSSize) -> NSSize {
         setContentSize(size)
         glass.frame = NSRect(origin: .zero, size: size)
         content.frame = NSRect(origin: .zero, size: size)

@@ -25,6 +25,8 @@ enum SampleRender {
         write({ $0.configure(entries: entries(3, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("thumbnails-3.png"))
         write({ $0.configure(entries: entries(6, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .aqua, to: directory.appendingPathComponent("thumbnails-6-light.png"))
         write({ $0.configure(entries: entries(18, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("thumbnails-18-compressed.png"))
+        write({ $0.configureEmpty() }, appearance: .darkAqua, to: directory.appendingPathComponent("empty-dark.png"))
+        write({ $0.configureEmpty() }, appearance: .aqua, to: directory.appendingPathComponent("empty-light.png"))
         write({ $0.configure(entries: entries(30, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("thumbnails-30-falls-back-to-list.png"))
     }
 

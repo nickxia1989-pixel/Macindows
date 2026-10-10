@@ -59,7 +59,7 @@ enum Diagnose {
 }
 
 /// `Horizon --selftest`：在 Horizon 正常运行时模拟几次鼠标移动，检查悬停相关的行为。
-/// 会把鼠标在程序坞附近移动约 5 秒再移回原处，不点击任何东西。结果写到日志目录的 selftest.txt。
+/// 会把鼠标在程序坞附近移动约 7 秒再移回原处，不点击任何东西。结果写到日志目录的 selftest.txt。
 enum SelfTest {
     static let url = Log.directory.appendingPathComponent("selftest.txt")
 
@@ -76,7 +76,10 @@ enum SelfTest {
             lines.append("程序坞里没有带窗口的 App，无法自检")
             return
         }
-        let windowless = items.first { windowCount($0) == 0 && abs($0.frame.midX - target.frame.midX) + abs($0.frame.midY - target.frame.midY) > 100 }
+        func far(_ item: DockItem) -> Bool { abs(item.frame.midX - target.frame.midX) + abs(item.frame.midY - target.frame.midY) > 100 }
+        // 在运行但没有窗口的 App，以及根本没在运行的 App
+        let idle = items.first { $0.runningApp != nil && windowCount($0) == 0 && far($0) }
+        let stopped = items.first { $0.runningApp == nil && far($0) }
 
         func move(_ point: CGPoint) {
             CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
@@ -121,14 +124,30 @@ enum SelfTest {
         move(CGPoint(x: panel.midX, y: panel.midY)); spin(0.05); move(CGPoint(x: panel.midX + 1, y: panel.midY)); spin(0.6)
         lines.append("鼠标移进列表: " + (panelFrame() != nil ? "列表保持显示" : "列表被关掉了"))
 
-        // 列表开着时移到一个没有窗口的 App 上，旧列表应该自己关掉
-        if let windowless {
+        // 列表开着时移到「在运行但没有窗口」的 App 上：换成一行的小卡片
+        if let idle {
             hover(target); spin(0.4)
-            hover(windowless); spin(0.2)
-            move(CGPoint(x: windowless.frame.midX - 2, y: windowless.frame.midY)); spin(0.7)
-            lines.append("移到没有窗口的 App 上: " + (panelFrame() == nil ? "旧列表已关闭" : "旧列表还开着"))
+            let list = panelFrame()
+            hover(idle); spin(0.2)
+            move(CGPoint(x: idle.frame.midX - 2, y: idle.frame.midY)); spin(0.7)
+            if let card = panelFrame() {
+                let moved = abs(card.midX - (list?.midX ?? card.midX)) > 20 || card.height < (list?.height ?? 0)
+                lines.append("移到在运行但没有窗口的 App 上: " + (card.height <= 44 && moved ? "换成了小卡片（\(Int(card.width))x\(Int(card.height))）" : "显示的不是小卡片（\(Int(card.width))x\(Int(card.height))）"))
+            } else {
+                lines.append("移到在运行但没有窗口的 App 上: 什么都没显示")
+            }
         } else {
-            lines.append("程序坞里没有不带窗口的 App，跳过这一项")
+            lines.append("程序坞里没有「在运行但没有窗口」的 App，跳过这一项")
+        }
+
+        // 列表开着时移到没在运行的 App 上：旧列表应该自己关掉
+        if let stopped {
+            hover(target); spin(0.4)
+            hover(stopped); spin(0.2)
+            move(CGPoint(x: stopped.frame.midX - 2, y: stopped.frame.midY)); spin(0.7)
+            lines.append("移到没在运行的 App 上: " + (panelFrame() == nil ? "旧列表已关闭" : "旧列表还开着"))
+        } else {
+            lines.append("程序坞里没有未运行的 App，跳过这一项")
         }
 
         move(outside); spin(0.4)

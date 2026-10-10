@@ -8,6 +8,8 @@ enum PrivateAPI {
     private typealias GetProcessForPIDFn = @convention(c) (pid_t, UnsafeMutablePointer<ProcessSerialNumber>) -> OSStatus
     private typealias SetFrontProcessFn = @convention(c) (UnsafeMutablePointer<ProcessSerialNumber>, CGWindowID, UInt32) -> CGError
     private typealias PostEventRecordFn = @convention(c) (UnsafeMutablePointer<ProcessSerialNumber>, UnsafeMutablePointer<UInt8>) -> CGError
+    private typealias MainConnectionFn = @convention(c) () -> Int32
+    private typealias CaptureWindowListFn = @convention(c) (Int32, UnsafeMutablePointer<CGWindowID>, UInt32, UInt32) -> Unmanaged<CFArray>?
 
     private static func symbol<T>(_ name: String, as type: T.Type) -> T? {
         guard let pointer = dlsym(UnsafeMutableRawPointer(bitPattern: -2), name) else { return nil }
@@ -18,10 +20,13 @@ enum PrivateAPI {
     private static let getProcessForPID = symbol("GetProcessForPID", as: GetProcessForPIDFn.self)
     private static let setFrontProcess = symbol("_SLPSSetFrontProcessWithOptions", as: SetFrontProcessFn.self)
     private static let postEventRecord = symbol("SLPSPostEventRecordTo", as: PostEventRecordFn.self)
+    private static let mainConnection = symbol("CGSMainConnectionID", as: MainConnectionFn.self)
+    private static let captureWindowList = symbol("CGSHWCaptureWindowList", as: CaptureWindowListFn.self)
 
     static var availability: [(String, Bool)] {
         [("_AXUIElementGetWindow", axGetWindow != nil), ("GetProcessForPID", getProcessForPID != nil),
-         ("_SLPSSetFrontProcessWithOptions", setFrontProcess != nil), ("SLPSPostEventRecordTo", postEventRecord != nil)]
+         ("_SLPSSetFrontProcessWithOptions", setFrontProcess != nil), ("SLPSPostEventRecordTo", postEventRecord != nil),
+         ("CGSHWCaptureWindowList", mainConnection != nil && captureWindowList != nil)]
     }
 
     /// 辅助功能里的窗口元素对应的系统窗口号。截缩略图和精确切换窗口都要用它。
@@ -29,6 +34,18 @@ enum PrivateAPI {
         guard let axGetWindow else { return nil }
         var id: CGWindowID = 0
         return axGetWindow(element, &id) == .success && id != 0 ? id : nil
+    }
+
+    /// 直接向窗口服务器要一个窗口当前的画面。和公开的截屏接口不同，它对已经最小化或被隐藏的窗口也有效
+    /// （窗口服务器一直留着它们的画面）。同样需要「屏幕录制」权限。
+    static func captureWindow(_ id: CGWindowID) -> CGImage? {
+        guard let mainConnection, let captureWindowList else { return nil }
+        var id = id
+        // 忽略屏幕形状的裁剪（1 << 11），按 1 倍分辨率（1 << 9）——做缩略图足够了
+        let options: UInt32 = (1 << 11) | (1 << 9)
+        guard let images = captureWindowList(mainConnection(), &id, 1, options)?.takeRetainedValue() as? [AnyObject],
+              let first = images.first, CFGetTypeID(first) == CGImage.typeID else { return nil }
+        return (first as! CGImage)
     }
 
     /// 把指定 App 的指定窗口切到最前，并且只带这一个窗口上来（公开接口会把该 App 的所有窗口都带上来）。

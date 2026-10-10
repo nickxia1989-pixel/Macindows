@@ -34,6 +34,24 @@ final class ClickPolicyTests: XCTestCase {
     }
 }
 
+final class WindowFilterTests: XCTestCase {
+    func testStandardWindowsAreListed() {
+        XCTAssertTrue(isListableWindow(subrole: "AXStandardWindow", isMinimized: false))
+        XCTAssertTrue(isListableWindow(subrole: "AXStandardWindow", isMinimized: true))
+    }
+
+    func testMinimizedWindowsReportedAsDialogsAreStillListed() {
+        XCTAssertTrue(isListableWindow(subrole: "AXDialog", isMinimized: true))
+    }
+
+    func testPanelsAndOnScreenDialogsAreNotListed() {
+        XCTAssertFalse(isListableWindow(subrole: "AXDialog", isMinimized: false))
+        XCTAssertFalse(isListableWindow(subrole: "AXFloatingWindow", isMinimized: false))
+        XCTAssertFalse(isListableWindow(subrole: "AXSystemDialog", isMinimized: true))
+        XCTAssertFalse(isListableWindow(subrole: nil, isMinimized: true))
+    }
+}
+
 final class GeometryTests: XCTestCase {
     func testCoordinateConversionRoundTrips() {
         let r = cocoaRect(fromTopLeft: CGRect(x: 10, y: 30, width: 100, height: 50), primaryHeight: 1440)

@@ -38,12 +38,13 @@ enum WindowIndex {
         var windows: [AppWindow] = []
         for object in raw where CFGetTypeID(object) == AXUIElementGetTypeID() {
             let window = object as! AXUIElement
-            guard window.string(kAXSubroleAttribute) == kAXStandardWindowSubrole else { continue }
+            let isMinimized = window.bool(kAXMinimizedAttribute) ?? false
+            guard isListableWindow(subrole: window.string(kAXSubroleAttribute), isMinimized: isMinimized) else { continue }
             let title = window.string(kAXTitleAttribute) ?? ""
             windows.append(AppWindow(element: window,
                                      id: PrivateAPI.windowID(of: window),
                                      title: title.isEmpty ? fallbackTitle : title,
-                                     isMinimized: window.bool(kAXMinimizedAttribute) ?? false,
+                                     isMinimized: isMinimized,
                                      isMain: window.bool(kAXMainAttribute) ?? false))
         }
         // 顺序固定为窗口打开的先后（系统窗口号递增），和 Windows 任务栏一致。

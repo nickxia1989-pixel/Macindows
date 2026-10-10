@@ -8,7 +8,8 @@ enum Thumbnailer {
     /// 让系统弹出授权请求。授权后通常要重新打开应用才生效。
     static func requestAccess() { _ = CGRequestScreenCaptureAccess() }
 
-    /// 截取一批窗口。截不到的（例如部分已最小化的窗口）不会出现在结果里。
+    /// 截取一批窗口。先用公开的截屏接口；它对已最小化的窗口会失败（实测报「无法开始流播放」），
+    /// 这些再直接向窗口服务器要画面——窗口服务器一直留着最小化窗口的画面。两种办法都拿不到的不会出现在结果里。
     static func capture(windowIDs: [CGWindowID], maxPixelSize: CGFloat = 560) async -> [CGWindowID: NSImage] {
         guard isAuthorized, !windowIDs.isEmpty else { return [:] }
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false) else { return [:] }
@@ -35,6 +36,20 @@ enum Thumbnailer {
             for await (id, image) in group {
                 if let image { result[id] = image }
             }
+        }
+        let missing = windowIDs.filter { result[$0] == nil }
+        if !missing.isEmpty {
+            let recovered = await Task.detached(priority: .userInitiated) { () -> [CGWindowID: CGImage] in
+                var images: [CGWindowID: CGImage] = [:]
+                for id in missing {
+                    if let image = PrivateAPI.captureWindow(id) { images[id] = image }
+                }
+                return images
+            }.value
+            for (id, image) in recovered {
+                result[id] = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+            }
+            log("thumbnails: \(result.count)/\(windowIDs.count) captured, \(recovered.count) of them from the window server")
         }
         return result
     }

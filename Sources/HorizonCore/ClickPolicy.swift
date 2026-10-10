@@ -35,3 +35,12 @@ public func dockClickAction(for s: AppWindowState) -> DockClickAction {
     if s.isHidden || s.minimizedCount >= 1 { return .passThrough }
     return s.isFrontmost ? .hideApp : .passThrough
 }
+
+/// 辅助功能报告的一个窗口要不要列出来。
+/// 只列「标准窗口」，面板、对话框、浮层之类不算。但有一个坑：窗口最小化之后，系统会把它的类型从标准窗口
+/// 改报成对话框（在 macOS 27 上对活动监视器、微信等实测如此），恢复后又变回来。所以最小化的对话框也要算，
+/// 否则窗口一最小化就从列表里消失了。
+public func isListableWindow(subrole: String?, isMinimized: Bool) -> Bool {
+    if subrole == "AXStandardWindow" { return true }
+    return isMinimized && subrole == "AXDialog"
+}

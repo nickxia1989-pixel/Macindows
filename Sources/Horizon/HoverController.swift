@@ -36,6 +36,12 @@ final class HoverController {
     private var showTimer: Timer?
     private var hideTimer: Timer?
     private var refreshTimer: Timer?
+    /// App 一时没应答（正忙或刚启动）时的重试
+    private var retryTimer: Timer?
+    private var retryItem: DockItem?
+    private var retryAttempts = 0
+    /// 悬停窗开着时连续几次没读到窗口；偶尔一次读不到不该把悬停窗关掉
+    private var refreshFailures = 0
     private var monitors: [Any] = []
     private var lastMove: TimeInterval = 0
     private var captureGeneration = 0
@@ -48,6 +54,12 @@ final class HoverController {
     private var aimTimer: Timer?
     /// 最近几十毫秒的鼠标位置（AppKit 坐标），用来估算移动速度
     private var trail: [(time: TimeInterval, point: NSPoint)] = []
+    /// 程序坞自己的菜单（右键、按住 Control 点、按住不放都会叫出来）是否开着。开着的时候悬停窗让位，不和它叠在一起
+    private var dockMenuOpen = false
+    private var menuItem: DockItem?
+    private var menuTimer: Timer?
+    private var menuSeen = false
+    private var menuDeadline: TimeInterval = 0
     /// 最近截到的画面。窗口最小化或隐藏后截不到新的，就用它
     private var thumbnailCache: [CGWindowID: NSImage] = [:]
 
@@ -60,7 +72,7 @@ final class HoverController {
         guard monitors.isEmpty else { return }
         dock.refresh()
         log("dock frame \(dock.frame)")
-        let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged]
+        let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDown]
         if let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] in self?.handle($0) }) {
             monitors.append(global)
         }
@@ -75,6 +87,9 @@ final class HoverController {
     func stop() {
         monitors.forEach(NSEvent.removeMonitor)
         monitors = []
+        menuTimer?.invalidate()
+        menuTimer = nil
+        dockMenuOpen = false
         hide()
     }
 
@@ -88,7 +103,11 @@ final class HoverController {
             onDrag?(point)
             return
         }
-        guard isEnabled else { return }
+        if event.type == .rightMouseDown {
+            mouseDown(at: point, opensMenu: true)
+            return
+        }
+        guard isEnabled, !dockMenuOpen else { return }
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastMove >= 0.016 else { return }
         lastMove = now
@@ -139,11 +158,33 @@ final class HoverController {
         guard item != nil || hovered != nil else { return }
         hovered = item
         showTimer?.invalidate()
+        retryTimer?.invalidate()
         // 没在运行的 App 没什么可显示的，交给程序坞自己的名称气泡
-        guard let item, let app = item.runningApp, let snapshot = WindowIndex.snapshot(of: app) else {
+        guard let item, let app = item.runningApp else {
             scheduleHide()
             return
         }
+        guard let snapshot = WindowIndex.snapshot(of: app) else {
+            // App 在运行，但这一次没读到它的窗口（它正忙，或者是启动后第一次问它，应答慢了）。
+            // 鼠标还停在这个图标上的话过一会儿再问，最多再问两次，而不是就此什么都不显示
+            scheduleHide()
+            if !item.isSame(as: retryItem) {
+                retryItem = item
+                retryAttempts = 0
+            }
+            if retryAttempts < 2 {
+                retryAttempts += 1
+                log("no answer from \(item.title), retry \(retryAttempts)")
+                retryTimer = timer(0.4) { [weak self] in
+                    guard let self, item.isSame(as: self.hovered) else { return }
+                    self.hovered = nil
+                    let current = NSEvent.mouseLocation
+                    self.evaluate(location: current, point: topLeftPoint(fromCocoa: current, primaryHeight: primaryScreenHeight))
+                }
+            }
+            return
+        }
+        retryItem = nil
         cancelHide()
         if panel.isVisible {
             present(item, app: app, snapshot: snapshot)
@@ -172,6 +213,52 @@ final class HoverController {
         return !screen.frame.insetBy(dx: 90, dy: 90).contains(location)
     }
 
+    // MARK: 程序坞的菜单
+
+    /// 鼠标在程序坞上按下了。右键一定会叫出程序坞的菜单，立刻让位；
+    /// 左键则可能是按住不放或按住 Control 点，也会叫出菜单，所以留意一小会儿。
+    func mouseDown(at point: CGPoint, opensMenu: Bool) {
+        guard isEnabled, dock.contains(point) else { return }
+        menuItem = dock.item(at: point)
+        menuSeen = false
+        menuDeadline = ProcessInfo.processInfo.systemUptime + (opensMenu ? 0.8 : 1.5)
+        if opensMenu {
+            dockMenuOpen = true
+            hide()
+        }
+        menuTimer?.invalidate()
+        let poll = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in self?.pollDockMenu() }
+        RunLoop.main.add(poll, forMode: .common)
+        menuTimer = poll
+    }
+
+    private func pollDockMenu() {
+        if isDockMenuShowing() {
+            menuSeen = true
+            if !dockMenuOpen {
+                dockMenuOpen = true
+                hide()
+            }
+        } else if menuSeen || ProcessInfo.processInfo.systemUptime > menuDeadline {
+            // 菜单关了（或者根本没出现）：恢复正常。鼠标要离开这个图标再回来才会重新弹出悬停窗
+            menuTimer?.invalidate()
+            menuTimer = nil
+            menuItem = nil
+            dockMenuOpen = false
+        }
+    }
+
+    /// 实测程序坞的菜单开着时有两个迹象：被点的图标在辅助功能里多出一个「已显示的菜单」，
+    /// 屏幕上多出一个属于 DockHelper 进程、处在菜单层级的窗口。两个都看，任何一个成立就算开着。
+    private func isDockMenuShowing() -> Bool {
+        if let menuItem, menuItem.element.element("AXShownMenuUIElement") != nil { return true }
+        let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+        let menuLevel = Int(CGWindowLevelForKey(.popUpMenuWindow))
+        return windows.contains {
+            ($0[kCGWindowOwnerName as String] as? String) == "DockHelper" && (($0[kCGWindowLayer as String] as? Int) ?? 0) >= menuLevel
+        }
+    }
+
     // MARK: 显示与隐藏
 
     /// 点击多窗口 App 的图标时调用：立即显示，不等悬停延时
@@ -189,7 +276,7 @@ final class HoverController {
     }
 
     private func present(_ item: DockItem, app: NSRunningApplication, snapshot: AppSnapshot) {
-        guard isEnabled, !app.isTerminated else {
+        guard isEnabled, !dockMenuOpen, !app.isTerminated else {
             hide()
             return
         }
@@ -236,6 +323,7 @@ final class HoverController {
         hideTimer?.invalidate()
         refreshTimer?.invalidate()
         refreshTimer = nil
+        refreshFailures = 0
         shown = nil
         signature = ""
         captureGeneration += 1
@@ -341,10 +429,17 @@ final class HoverController {
     /// 悬停窗开着的时候每秒看一眼：窗口开了、关了、改了标题，或者 App 退出了，就跟着更新
     private func refresh() {
         guard let current = shown else { return }
-        guard !current.app.isTerminated, let snapshot = WindowIndex.snapshot(of: current.app) else {
+        guard !current.app.isTerminated else {
             hide()
             return
         }
+        guard let snapshot = WindowIndex.snapshot(of: current.app) else {
+            // 偶尔一次读不到就先保持原样，连续三次才认为它真的没法显示了
+            refreshFailures += 1
+            if refreshFailures >= 3 { hide() }
+            return
+        }
+        refreshFailures = 0
         switch current {
         case .empty(let item, let app):
             if !snapshot.windows.isEmpty { present(item, app: app, snapshot: snapshot) }

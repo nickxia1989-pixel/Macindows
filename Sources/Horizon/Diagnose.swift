@@ -61,7 +61,7 @@ enum Diagnose {
 }
 
 /// `Horizon --selftest`：在 Horizon 正常运行时模拟几次鼠标移动，检查悬停相关的行为。
-/// 会把鼠标在程序坞附近移动约 13 秒再移回原处，不点击任何东西。结果写到日志目录的 selftest.txt。
+/// 会把鼠标在程序坞附近移动约 17 秒再移回原处。期间会在一个图标上点一次右键并用 Esc 关掉菜单，不做其他点击。结果写到日志目录的 selftest.txt。
 enum SelfTest {
     static let url = Log.directory.appendingPathComponent("selftest.txt")
 
@@ -108,6 +108,19 @@ enum SelfTest {
         let onLeft = dock.frame.midX < 400
         let outside = horizontal ? CGPoint(x: target.frame.midX, y: dock.frame.minY - 400)
                                  : CGPoint(x: onLeft ? dock.frame.maxX + 500 : dock.frame.minX - 500, y: target.frame.midY)
+
+        // 先确认模拟的鼠标移动真的生效了。重新编译后第一次运行时，系统可能要过几秒才放行本程序发出的输入事件，
+        // 这期间发出去的移动会被悄悄丢掉；不先确认的话，后面每一项都会被误判成功能失效
+        var canMove = false
+        for _ in 0..<12 {
+            move(outside); spin(0.25)
+            if let now = CGEvent(source: nil)?.location, hypot(now.x - outside.x, now.y - outside.y) < 3 { canMove = true; break }
+            spin(0.5)
+        }
+        guard canMove else {
+            lines.append("模拟的鼠标移动没有生效（系统没有放行本程序发出的输入事件），这次无法自检")
+            return
+        }
 
         move(outside); spin(0.3)
         hover(target); spin(0.9)
@@ -204,6 +217,26 @@ enum SelfTest {
             lines.append("移到没在运行的 App 上: " + (panelFrame() == nil ? "旧列表已关闭" : "旧列表还开着"))
         } else {
             lines.append("程序坞里没有未运行的 App，跳过这一项")
+        }
+
+        // 悬停窗开着时在图标上点右键：悬停窗要让位给程序坞自己的菜单；菜单关掉后鼠标还在图标上，也不该马上再弹
+        hover(target); spin(0.6)
+        if panelFrame() != nil {
+            let center = CGPoint(x: target.frame.midX, y: target.frame.midY)
+            CGEvent(mouseEventSource: nil, mouseType: .rightMouseDown, mouseCursorPosition: center, mouseButton: .right)?.post(tap: .cghidEventTap); spin(0.05)
+            CGEvent(mouseEventSource: nil, mouseType: .rightMouseUp, mouseCursorPosition: center, mouseButton: .right)?.post(tap: .cghidEventTap); spin(0.5)
+            let duringMenu = panelFrame() == nil
+            move(CGPoint(x: center.x + 3, y: center.y)); spin(0.5)
+            let stillHidden = panelFrame() == nil
+            CGEvent(keyboardEventSource: nil, virtualKey: 53, keyDown: true)?.post(tap: .cghidEventTap)
+            CGEvent(keyboardEventSource: nil, virtualKey: 53, keyDown: false)?.post(tap: .cghidEventTap)
+            spin(0.5)
+            move(CGPoint(x: center.x - 3, y: center.y)); spin(0.6)
+            let afterMenu = panelFrame() == nil
+            lines.append("在图标上点右键: " + (duringMenu && stillHidden ? "悬停窗已让位" : "悬停窗还在") + "；菜单关掉后鼠标仍在图标上: " + (afterMenu ? "没有再弹" : "又弹出来了"))
+            move(outside); spin(0.5)
+            hover(target); spin(0.8)
+            lines.append("移开再回来: " + (panelFrame() != nil ? "悬停窗正常弹出" : "悬停窗没有弹出"))
         }
 
         move(outside); spin(0.4)

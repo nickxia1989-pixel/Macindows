@@ -52,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hover.start()
 
         interceptor.decide = { [weak self] point in self?.decide(clickAt: point) ?? .passThrough }
+        interceptor.onMouseDown = { [weak self] point in self?.hover.mouseDown(at: point, opensMenu: false) }
         let tapped = interceptor.start()
         log("services started, click interception \(tapped ? "on" : "FAILED")")
     }

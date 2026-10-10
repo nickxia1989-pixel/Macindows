@@ -12,6 +12,8 @@ final class ClickInterceptor {
 
     /// 鼠标左键按下时调用，参数是左上角为原点的全局坐标
     var decide: ((CGPoint) -> Decision)?
+    /// 每次左键按下都会调用（包括带修饰键、不会被截的那些），只是知会，不影响这次点击
+    var onMouseDown: ((CGPoint) -> Void)?
 
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
@@ -65,6 +67,7 @@ final class ClickInterceptor {
         switch type {
         case .leftMouseDown:
             release(repost: false)
+            onMouseDown?(event.location)
             // 带修饰键的点击是系统功能（在访达中显示、隐藏其他 App 等），一律不碰
             let modifiers: CGEventFlags = [.maskCommand, .maskAlternate, .maskControl, .maskShift]
             guard event.flags.intersection(modifiers).isEmpty,

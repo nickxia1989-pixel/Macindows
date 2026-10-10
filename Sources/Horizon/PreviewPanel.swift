@@ -154,13 +154,12 @@ final class PreviewItemView: NSView {
     }
 }
 
-/// 悬停窗的内容：一组窗口，或者一个名称标签。
+/// 悬停窗的内容：一组窗口。没有标题行，只列窗口。
 final class PreviewContentView: NSView {
     static let padding: CGFloat = 6
     static let spacing: CGFloat = 4
     /// 缩略图再窄就看不清了，这时改成竖排的标题列表（和 Windows 任务栏的做法一致）
     static let minThumbWidth: CGFloat = 104
-    static let labelFont = NSFont.systemFont(ofSize: 13, weight: .medium)
 
     var onSelect: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
@@ -188,25 +187,6 @@ final class PreviewContentView: NSView {
         }
         setFrameSize(result)
         return result
-    }
-
-    /// 只有一行文字的名称标签，用来顶替程序坞自带的那个
-    @discardableResult
-    func configureLabel(_ text: String) -> NSSize {
-        reset()
-        let label = NSTextField(labelWithString: text)
-        label.font = Self.labelFont
-        label.textColor = .labelColor
-        label.alignment = .center
-        label.lineBreakMode = .byTruncatingTail
-        label.sizeToFit()
-        let width = min(label.frame.width.rounded(.up), 360)
-        let size = NSSize(width: width + 24, height: 28)
-        label.frame = NSRect(x: 12, y: ((size.height - label.frame.height) / 2).rounded(), width: width, height: label.frame.height)
-        addSubview(label)
-        extras = [label]
-        setFrameSize(size)
-        return size
     }
 
     /// 横向一排，窗口多了就整体缩小；缩到最小还放不下则返回 nil，由调用方改用列表。
@@ -290,15 +270,7 @@ final class PreviewPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     func render(entries: [PreviewEntry], thumbnails: Bool, placeholder: NSImage?, maxSize: CGSize) -> NSSize {
-        apply(content.configure(entries: entries, thumbnails: thumbnails, placeholder: placeholder, maxSize: maxSize), cornerRadius: 14)
-    }
-
-    func renderLabel(_ text: String) -> NSSize {
-        apply(content.configureLabel(text), cornerRadius: 14)
-    }
-
-    private func apply(_ size: NSSize, cornerRadius: CGFloat) -> NSSize {
-        glass.cornerRadius = min(cornerRadius, size.height / 2)
+        let size = content.configure(entries: entries, thumbnails: thumbnails, placeholder: placeholder, maxSize: maxSize)
         setContentSize(size)
         glass.frame = NSRect(origin: .zero, size: size)
         content.frame = NSRect(origin: .zero, size: size)

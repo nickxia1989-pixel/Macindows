@@ -12,7 +12,7 @@ enum SampleRender {
             (0..<count).map { index in
                 let aspect = aspects[index % aspects.count]
                 // 每三个里留一个没有画面的，检查占位图标
-                let image = images && index % 3 != 2 ? sampleImage(aspect: aspect, hue: CGFloat(index % 6) * 0.14 + 0.5) : nil
+                let image = images && index % 3 != 2 ? sampleImage(aspect: aspect, hue: CGFloat(index % 6) * 0.07 + 0.5) : nil
                 return PreviewEntry(title: titles[index % titles.count], isCurrent: index == 0, aspect: aspect, thumbnail: image)
             }
         }
@@ -26,8 +26,6 @@ enum SampleRender {
         write({ $0.configure(entries: entries(6, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .aqua, to: directory.appendingPathComponent("thumbnails-6-light.png"))
         write({ $0.configure(entries: entries(18, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("thumbnails-18-compressed.png"))
         write({ $0.configure(entries: entries(30, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("thumbnails-30-falls-back-to-list.png"))
-        write({ $0.configureLabel("Google Chrome") }, appearance: .darkAqua, to: directory.appendingPathComponent("label-dark.png"))
-        write({ $0.configureLabel("废纸篓") }, appearance: .aqua, to: directory.appendingPathComponent("label-light.png"))
     }
 
     private static func sampleImage(aspect: CGFloat, hue: CGFloat) -> NSImage {

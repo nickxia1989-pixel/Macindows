@@ -61,7 +61,7 @@ enum Diagnose {
 }
 
 /// `Horizon --selftest`：在 Horizon 正常运行时模拟几次鼠标移动，检查悬停相关的行为。
-/// 会把鼠标在程序坞附近移动约 10 秒再移回原处，不点击任何东西。结果写到日志目录的 selftest.txt。
+/// 会把鼠标在程序坞附近移动约 13 秒再移回原处，不点击任何东西。结果写到日志目录的 selftest.txt。
 enum SelfTest {
     static let url = Log.directory.appendingPathComponent("selftest.txt")
 
@@ -144,6 +144,24 @@ enum SelfTest {
                 spin(0.15)
                 let after = panelFrame()
                 lines.append("斜着移向悬停窗、途中扫过相邻图标（\(crossed ? "确实扫到了" : "这次路线没扫到")）: " + (after.map { abs($0.midX - before.midX) < 2 ? "列表没有被换掉" : "列表被换成了别的" } ?? "列表被关掉了"))
+                // 更难的走法：先贴着程序坞横着慢慢扫过两三个图标，再往上进悬停窗。全程约 1.4 秒
+                hover(target); spin(0.5)
+                if let wide = panelFrame() {
+                    let reach = min(200, max(70, (direction > 0 ? wide.maxX - start.x : start.x - wide.minX) - 20))
+                    let corner = CGPoint(x: start.x + direction * reach, y: target.frame.midY - 6)
+                    for step in 1...40 {
+                        let t = CGFloat(step) / 40
+                        move(CGPoint(x: start.x + (corner.x - start.x) * t, y: start.y + (corner.y - start.y) * t)); spin(0.025)
+                    }
+                    let top = CGPoint(x: corner.x, y: wide.maxY - 12)
+                    for step in 1...16 {
+                        let t = CGFloat(step) / 16
+                        move(CGPoint(x: corner.x, y: corner.y + (top.y - corner.y) * t)); spin(0.025)
+                    }
+                    spin(0.2)
+                    let kept = panelFrame()
+                    lines.append("先横着慢扫 \(Int(reach)) 点再往上进悬停窗: " + (kept.map { abs($0.midX - wide.midX) < 2 ? "列表没有被换掉" : "列表被换成了别的" } ?? "列表被关掉了"))
+                }
                 // 沿着程序坞水平移到相邻图标并停住：应该换成相邻图标的内容（或关闭）
                 hover(target); spin(0.4)
                 hover(neighbor); spin(0.9)

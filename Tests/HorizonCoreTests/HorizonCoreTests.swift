@@ -100,29 +100,48 @@ final class GeometryTests: XCTestCase {
         XCTAssertEqual(corridor(panelFrame: panel, itemFrame: item, dockFrame: dock, edge: .left), CGRect(x: 59, y: 823, width: 141, height: 200))
     }
 
-    func testAimTriangleKeepsADiagonalPathButNotASidewaysOne() {
+    func testAimZoneCoversTheDockUnderAWidePanel() {
         // 底部程序坞：图标在下，很宽的悬停窗在上方
-        let origin = CGPoint(x: 1000, y: 45)
+        let dock = CGRect(x: 236, y: 10, width: 2088, height: 79)
+        let item = CGRect(x: 1000, y: 10, width: 63, height: 79)
         let panel = CGRect(x: 300, y: 125, width: 1400, height: 160)
-        let (a, b, c) = aimTriangle(from: origin, panelFrame: panel, edge: .bottom)
-        // 朝悬停窗最左边那一格斜着移过去，途中每一点都在三角里
-        let target = CGPoint(x: 320, y: 125)
-        for step in 1...9 {
-            let t = CGFloat(step) / 10
-            XCTAssertTrue(triangleContains(CGPoint(x: origin.x + (target.x - origin.x) * t, y: origin.y + (target.y - origin.y) * t), a, b, c))
-        }
-        // 沿着程序坞水平移到隔壁图标：不在三角里，应该立刻切换
-        XCTAssertFalse(triangleContains(CGPoint(x: 937, y: 45), a, b, c))
-        XCTAssertFalse(triangleContains(CGPoint(x: 1063, y: 44), a, b, c))
-        // 往下移（离开程序坞方向相反）也不算
-        XCTAssertFalse(triangleContains(CGPoint(x: 1000, y: 20), a, b, c))
+        let zone = aimZone(panelFrame: panel, itemFrame: item, dockFrame: dock, edge: .bottom)
+        // 悬停窗正下方的图标都在这一段里，不管鼠标是斜着来还是先横着走
+        XCTAssertTrue(zone.contains(CGPoint(x: 937, y: 45)))
+        XCTAssertTrue(zone.contains(CGPoint(x: 400, y: 20)))
+        XCTAssertTrue(zone.contains(CGPoint(x: 1650, y: 80)))
+        // 贴着屏幕底边也算
+        XCTAssertTrue(zone.contains(CGPoint(x: 1200, y: 0)))
+        // 悬停窗范围之外的图标不在其中，移过去应该立刻切换
+        XCTAssertFalse(zone.contains(CGPoint(x: 250, y: 45)))
+        XCTAssertFalse(zone.contains(CGPoint(x: 1800, y: 45)))
+        // 程序坞上方属于另一块（悬停窗和程序坞之间的空隙），不归这里管
+        XCTAssertFalse(zone.contains(CGPoint(x: 1000, y: 100)))
     }
 
-    func testAimTriangleForASideDock() {
-        let origin = CGPoint(x: 30, y: 600)
-        let panel = CGRect(x: 200, y: 300, width: 300, height: 600)
-        let (a, b, c) = aimTriangle(from: origin, panelFrame: panel, edge: .left)
-        XCTAssertTrue(triangleContains(CGPoint(x: 120, y: 480), a, b, c))
-        XCTAssertFalse(triangleContains(CGPoint(x: 30, y: 540), a, b, c))
+    func testAimZoneFollowsTheIconWhenThePanelIsPushedAside() {
+        let dock = CGRect(x: 0, y: 10, width: 900, height: 79)
+        let item = CGRect(x: 2, y: 10, width: 60, height: 79)
+        let panel = CGRect(x: 40, y: 125, width: 300, height: 160)
+        let zone = aimZone(panelFrame: panel, itemFrame: item, dockFrame: dock, edge: .bottom)
+        XCTAssertTrue(zone.contains(CGPoint(x: 5, y: 45)))
+    }
+
+    func testAimZoneBesideALeftDock() {
+        let dock = CGRect(x: 0, y: 400, width: 59, height: 600)
+        let item = CGRect(x: 6, y: 900, width: 46, height: 46)
+        let panel = CGRect(x: 200, y: 600, width: 300, height: 400)
+        let zone = aimZone(panelFrame: panel, itemFrame: item, dockFrame: dock, edge: .left)
+        XCTAssertTrue(zone.contains(CGPoint(x: 30, y: 700)))
+        XCTAssertFalse(zone.contains(CGPoint(x: 30, y: 500)))
+        XCTAssertFalse(zone.contains(CGPoint(x: 100, y: 700)))
+    }
+
+    func testDistanceToPanelShrinksWhenApproaching() {
+        let panel = CGRect(x: 300, y: 125, width: 1400, height: 160)
+        XCTAssertEqual(distanceToPanel(from: CGPoint(x: 900, y: 45), panelFrame: panel, edge: .bottom), 80)
+        XCTAssertEqual(distanceToPanel(from: CGPoint(x: 700, y: 65), panelFrame: panel, edge: .bottom), 60)
+        XCTAssertEqual(distanceToPanel(from: CGPoint(x: 150, y: 0), panelFrame: CGRect(x: 200, y: 0, width: 100, height: 100), edge: .left), 50)
+        XCTAssertEqual(distanceToPanel(from: CGPoint(x: 350, y: 0), panelFrame: CGRect(x: 200, y: 0, width: 100, height: 100), edge: .right), 50)
     }
 }

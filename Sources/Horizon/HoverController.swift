@@ -43,17 +43,20 @@ final class HoverController {
     private var bridge = CGRect.null
     /// 悬停窗贴着程序坞的哪条边
     private var shownEdge = DockEdge.bottom
-    /// 鼠标最近一次停在「悬停窗所属图标」上的位置（AppKit 坐标）。从这里出发朝悬停窗移动时，路过别的图标不算数
-    private var aimOrigin: NSPoint?
+    /// 悬停窗正下方的那一段程序坞（AppKit 坐标）。在这里路过别的图标不算数，要停住一会儿才切换
+    private var aimArea = CGRect.null
+    /// 鼠标在这一段里离悬停窗最近到过多远。还在继续靠近，就说明它是冲着悬停窗去的
+    private var aimClosest: CGFloat?
+    /// 鼠标在这一段里当前停在哪个图标上（没在图标上则为 nil）
+    private var aimCandidate: DockItem?
     private var aimTimer: Timer?
     /// 最近截到的画面。窗口最小化或隐藏后截不到新的，就用它
     private var thumbnailCache: [CGWindowID: NSImage] = [:]
 
     private let showDelay: TimeInterval = 0.25
     private let hideDelay: TimeInterval = 0.25
-    /// 朝悬停窗移动的途中在别的图标上停多久，才算是真的想换到那个图标
-    private let aimPatience: TimeInterval = 0.3
-    static let placeholderTitle = "点击打开新窗口"
+    /// 悬停窗开着时，鼠标要在它下方的另一个图标上停多久（且不再向悬停窗靠近），才算是真的想换到那个图标
+    private let aimPatience: TimeInterval = 0.4
 
     func start() {
         guard monitors.isEmpty else { return }
@@ -95,7 +98,7 @@ final class HoverController {
     }
 
     /// 按鼠标当前位置决定悬停窗的去留。location 是 AppKit 坐标，point 是同一位置的左上角原点坐标。
-    private func evaluate(location: NSPoint, point: CGPoint) {
+    private func evaluate(location: NSPoint, point: CGPoint, honoringAim: Bool = true) {
         // 鼠标已经移进悬停窗，或正在从图标移向它的空隙里：保持显示
         if panel.isVisible, panel.cardFrame.insetBy(dx: -4, dy: -4).contains(location) || bridge.contains(location) {
             cancelHide()
@@ -110,25 +113,30 @@ final class HoverController {
             // 只有鼠标停在「悬停窗所属的那个图标」上才续命；停在别的没有内容可显示的图标上，旧的悬停窗照常关闭
             if item.isSame(as: shown?.item) {
                 cancelHide()
-                aimOrigin = location
+                endAim()
             }
             return
         }
-        // 悬停窗很宽时，从图标斜着移向远处的窗口会扫过别的图标。只要鼠标还在「出发点—悬停窗」这个三角里，
-        // 就当它是冲着悬停窗去的，不切换也不关闭；真在某个图标上停住了，过一会儿再按那个图标处理。
-        if panel.isVisible, shown != nil, let origin = aimOrigin {
-            let triangle = aimTriangle(from: origin, panelFrame: panel.cardFrame, edge: shownEdge)
-            if triangleContains(location, triangle.0, triangle.1, triangle.2) {
-                cancelHide()
+        // 悬停窗很宽时，从图标移向远处的窗口会扫过别的图标（往往先贴着程序坞横着走一阵再往上）。
+        // 所以在悬停窗正下方的这一段里，路过别的图标不切换也不关闭；只有在同一个图标上停够时间、
+        // 并且这段时间里没有再向悬停窗靠近，才按那个图标处理。
+        if honoringAim, panel.isVisible, shown != nil, aimArea.contains(location) {
+            let distance = distanceToPanel(from: location, panelFrame: panel.cardFrame, edge: shownEdge)
+            let approaching = aimClosest.map { distance < $0 - 2 } ?? true
+            if approaching { aimClosest = distance }
+            let sameIcon = item.map { $0.isSame(as: aimCandidate) } ?? (aimCandidate == nil)
+            if approaching || !sameIcon || aimTimer == nil {
+                aimCandidate = item
                 aimTimer?.invalidate()
                 aimTimer = timer(aimPatience) { [weak self] in
                     guard let self else { return }
                     self.endAim()
                     let current = NSEvent.mouseLocation
-                    self.evaluate(location: current, point: topLeftPoint(fromCocoa: current, primaryHeight: primaryScreenHeight))
+                    self.evaluate(location: current, point: topLeftPoint(fromCocoa: current, primaryHeight: primaryScreenHeight), honoringAim: false)
                 }
-                return
             }
+            cancelHide()
+            return
         }
         endAim()
         guard item != nil || hovered != nil else { return }
@@ -151,7 +159,8 @@ final class HoverController {
     }
 
     private func endAim() {
-        aimOrigin = nil
+        aimClosest = nil
+        aimCandidate = nil
         aimTimer?.invalidate()
         aimTimer = nil
     }
@@ -189,8 +198,8 @@ final class HoverController {
             shown = .empty(item, app)
             signature = ""
             captureGeneration += 1
-            // 和只有一个窗口时的悬停窗一样大：标题换成提示语，画面的位置放 App 图标
-            let entry = PreviewEntry(title: Self.placeholderTitle, isCurrent: false, aspect: nil, thumbnail: nil, isPlaceholder: true)
+            // 和只有一个窗口时的悬停窗一样大：标题是 App 的名字，画面的位置放 App 图标
+            let entry = PreviewEntry(title: app.localizedName ?? item.title, isCurrent: false, aspect: nil, thumbnail: nil, isPlaceholder: true)
             if let layout = layout(for: item) {
                 place(panel.render(entries: [entry], thumbnails: showsThumbnails, placeholder: app.icon, maxSize: layout.maxSize), layout)
             }
@@ -202,8 +211,6 @@ final class HoverController {
             render()
             loadThumbnails()
         }
-        // 悬停窗出现时鼠标就在它所属的图标上（悬停或点击触发），从这里开始算瞄准
-        aimOrigin = NSEvent.mouseLocation
         reveal()
         if refreshTimer == nil {
             let refresh = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.refresh() }
@@ -231,6 +238,7 @@ final class HoverController {
         signature = ""
         captureGeneration += 1
         bridge = .null
+        aimArea = .null
         endAim()
         if panel.isVisible { panel.orderOut(nil) }
     }
@@ -284,6 +292,7 @@ final class HoverController {
                                  edge: layout.edge, visibleFrame: layout.visible, gap: layout.gap)
         panel.setCardOrigin(origin)
         shownEdge = layout.edge
+        aimArea = aimZone(panelFrame: NSRect(origin: origin, size: size), itemFrame: layout.itemFrame, dockFrame: layout.dockFrame, edge: layout.edge)
         bridge = corridor(panelFrame: NSRect(origin: origin, size: size), itemFrame: layout.itemFrame, dockFrame: layout.dockFrame, edge: layout.edge)
     }
 

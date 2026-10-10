@@ -60,24 +60,29 @@ public func corridor(panelFrame: CGRect, itemFrame: CGRect, dockFrame: CGRect, e
     }
 }
 
-/// 点是否落在三角形内（含边上）
-public func triangleContains(_ p: CGPoint, _ a: CGPoint, _ b: CGPoint, _ c: CGPoint) -> Bool {
-    func side(_ p1: CGPoint, _ p2: CGPoint, _ p3: CGPoint) -> CGFloat { (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y) }
-    let d1 = side(p, a, b), d2 = side(p, b, c), d3 = side(p, c, a)
-    let hasNegative = d1 < 0 || d2 < 0 || d3 < 0
-    let hasPositive = d1 > 0 || d2 > 0 || d3 > 0
-    return !(hasNegative && hasPositive)
-}
-
-/// 鼠标从图标出发、朝悬停窗移动时的「瞄准三角」：顶点是出发位置，底边是悬停窗朝向程序坞的那条边（两端各放宽一点）。
-/// 只要鼠标还在这个三角里，就认为它是冲着悬停窗去的，途中路过别的图标不算数——系统菜单的子菜单用的是同一个办法。
-public func aimTriangle(from origin: CGPoint, panelFrame: CGRect, edge: DockEdge, slack: CGFloat = 10) -> (CGPoint, CGPoint, CGPoint) {
+/// 悬停窗开着时，程序坞上位于它正下方（侧边程序坞则是正旁边）的那一整段，两端再各放宽一点（AppKit 坐标）。
+/// 鼠标从图标移向悬停窗、尤其是移向远处的窗口时，往往先贴着程序坞横着走一阵再往上，途中会扫过别的图标。
+/// 在这一段里路过别的图标不算数，要停住一会儿才切换。
+public func aimZone(panelFrame: CGRect, itemFrame: CGRect, dockFrame: CGRect, edge: DockEdge,
+                    slack: CGFloat = 12, depth: CGFloat = 60) -> CGRect {
     switch edge {
     case .bottom:
-        return (origin, CGPoint(x: panelFrame.minX - slack, y: panelFrame.minY), CGPoint(x: panelFrame.maxX + slack, y: panelFrame.minY))
+        let minX = min(panelFrame.minX, itemFrame.minX) - slack, maxX = max(panelFrame.maxX, itemFrame.maxX) + slack
+        return CGRect(x: minX, y: dockFrame.minY - depth, width: maxX - minX, height: dockFrame.maxY - dockFrame.minY + depth)
     case .left:
-        return (origin, CGPoint(x: panelFrame.minX, y: panelFrame.minY - slack), CGPoint(x: panelFrame.minX, y: panelFrame.maxY + slack))
+        let minY = min(panelFrame.minY, itemFrame.minY) - slack, maxY = max(panelFrame.maxY, itemFrame.maxY) + slack
+        return CGRect(x: dockFrame.minX - depth, y: minY, width: dockFrame.maxX - dockFrame.minX + depth, height: maxY - minY)
     case .right:
-        return (origin, CGPoint(x: panelFrame.maxX, y: panelFrame.minY - slack), CGPoint(x: panelFrame.maxX, y: panelFrame.maxY + slack))
+        let minY = min(panelFrame.minY, itemFrame.minY) - slack, maxY = max(panelFrame.maxY, itemFrame.maxY) + slack
+        return CGRect(x: dockFrame.minX, y: minY, width: dockFrame.maxX - dockFrame.minX + depth, height: maxY - minY)
+    }
+}
+
+/// 鼠标离悬停窗朝向程序坞的那条边还有多远。数值变小说明鼠标在向悬停窗靠近。
+public func distanceToPanel(from point: CGPoint, panelFrame: CGRect, edge: DockEdge) -> CGFloat {
+    switch edge {
+    case .bottom: return panelFrame.minY - point.y
+    case .left: return panelFrame.minX - point.x
+    case .right: return point.x - panelFrame.maxX
     }
 }

@@ -8,7 +8,7 @@ struct PreviewEntry {
     /// 窗口的宽高比；缩略图还没截到时先按它占位，免得图到了以后版面跳动
     let aspect: CGFloat?
     var thumbnail: NSImage?
-    /// 不是真正的窗口，而是「这个 App 还没开窗口，点这里开一个」的占位项
+    /// 不是真正的窗口，而是「这个 App 还没开窗口，点这里开一个」的占位项（标题是 App 的名字）
     var isPlaceholder = false
 }
 
@@ -51,7 +51,7 @@ final class PreviewItemView: NSView {
 
         titleLabel.stringValue = entry.title
         titleLabel.font = entry.isCurrent ? Self.currentFont : Self.titleFont
-        titleLabel.textColor = entry.isPlaceholder ? .secondaryLabelColor : .labelColor
+        titleLabel.textColor = .labelColor
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.toolTip = entry.title
         addSubview(titleLabel)

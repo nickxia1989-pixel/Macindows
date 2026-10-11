@@ -116,7 +116,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         thumbnails.state = defaults.bool(forKey: "thumbnails") ? .on : .off
         menu.addItem(thumbnails)
         if defaults.bool(forKey: "thumbnails"), !Thumbnailer.isAuthorized {
-            let hint = NSMenuItem(title: L("需要“屏幕录制”权限，授权后请重新打开 Macindows"), action: nil, keyEquivalent: "")
+            let grant = NSMenuItem(title: L("需要“录屏与系统录音”权限，点此打开系统设置"), action: #selector(openScreenRecordingSettings), keyEquivalent: "")
+            grant.target = self
+            grant.indentationLevel = 1
+            menu.addItem(grant)
+            let hint = NSMenuItem(title: L("授权后请重新打开 Macindows"), action: nil, keyEquivalent: "")
             hint.indentationLevel = 1
             hint.isEnabled = false
             menu.addItem(hint)
@@ -183,6 +187,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func openAccessibilitySettings() { Accessibility.openSettings() }
+
+    @objc private func openScreenRecordingSettings() { Thumbnailer.openSettings() }
 
     @objc private func revealLog() {
         Log.flush()

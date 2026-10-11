@@ -3,7 +3,8 @@
 /* Menu bar menu */
 "启用 Macindows" = "Enable Macindows";
 "显示窗口缩略图" = "Show Window Thumbnails";
-"需要“屏幕录制”权限，授权后请重新打开 Macindows" = "Requires Screen Recording permission. Reopen Macindows after granting it.";
+"需要“录屏与系统录音”权限，点此打开系统设置" = "Needs Screen & System Audio Recording Permission. Click to Open System Settings";
+"授权后请重新打开 Macindows" = "Reopen Macindows after granting it.";
 "登录时自动启动" = "Launch at Login";
 "辅助功能权限：已授权" = "Accessibility: Granted";
 "辅助功能权限：未授权，点此打开系统设置" = "Accessibility: Not Granted. Click to Open System Settings";

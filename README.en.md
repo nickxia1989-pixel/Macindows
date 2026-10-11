@@ -66,7 +66,7 @@ The four-pane icon in the menu bar lets you pause or enable Macindows, turn wind
 1. Download `Macindows.dmg` from [Releases](https://github.com/nickxia1989-pixel/Macindows/releases/latest).
 2. Open it and drag Macindows into Applications.
 3. Launch Macindows and, when prompted, allow it under System Settings › Privacy & Security › Accessibility.
-4. For window thumbnails, turn on Show Window Thumbnails from the menu bar icon, then grant Screen Recording permission.
+4. For window thumbnails, turn on Show Window Thumbnails from the menu bar icon, allow Macindows under System Settings › Privacy & Security › Screen & System Audio Recording, then reopen it.
 
 <p align="center">
   <img src="docs/images/install.png" width="560" alt="Open the disk image and drag Macindows into Applications">
@@ -83,7 +83,7 @@ The installer is signed with a Developer ID and notarized by Apple, so macOS ope
 | Permission | Required | What it is used for |
 | --- | --- | --- |
 | Accessibility | Yes | Knowing which Dock icon the pointer is on; listing, switching, minimizing and closing windows; recognizing clicks on Dock icons |
-| Screen Recording | Optional | Only for the window thumbnails in the hover panel |
+| Screen Recording (listed as Screen & System Audio Recording in System Settings) | Optional | Only for the window thumbnails in the hover panel |
 
 These permissions are broad, so here is exactly what Macindows does with them:
 
@@ -151,6 +151,8 @@ open -n /Applications/Macindows.app --args --diagnose   # writes ~/Library/Logs/
 open -n /Applications/Macindows.app --args --selftest   # simulates a hover (moves the pointer briefly), writes selftest.txt
 build/Macindows.app/Contents/MacOS/Macindows --render-sample /tmp/macindows-sample   # renders the panel layout with sample data
 ```
+
+**A permission switch is on but has no effect?** In the corresponding list in System Settings, select Macindows, remove it with the “−” button, then add it again. This happens when a self-built copy and a released copy have both been installed on the same Mac: they are signed differently, so macOS treats them as two apps and the old grant does not match the new one.
 
 The running log is at `~/Library/Logs/Macindows/macindows.log`. The output of `--diagnose` includes the titles of your current windows. It also stays on your Mac, so review it before attaching it to an issue.
 

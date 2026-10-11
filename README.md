@@ -66,7 +66,7 @@
 1. 在 [Releases](https://github.com/nickxia1989-pixel/Macindows/releases/latest) 下载 `Macindows.dmg`。
 2. 打开它，把 Macindows 拖进「应用程序」。
 3. 启动 Macindows，按提示在「系统设置 › 隐私与安全性 › 辅助功能」中允许它。
-4. 想看窗口缩略图的话，在菜单栏图标里打开「显示窗口缩略图」，再授予「屏幕录制」权限。
+4. 想看窗口缩略图的话，在菜单栏图标里打开「显示窗口缩略图」，再到「系统设置 › 隐私与安全性 › 录屏与系统录音」里允许 Macindows，然后重新打开它。
 
 <p align="center">
   <img src="docs/images/install.png" width="560" alt="打开安装镜像后，把 Macindows 拖进「应用程序」">
@@ -83,7 +83,7 @@
 | 权限 | 是否必需 | 用来做什么 |
 | --- | --- | --- |
 | 辅助功能 | 必需 | 判断鼠标停在程序坞的哪个图标上；列出、切换、最小化、关闭窗口；识别对程序坞图标的点击 |
-| 屏幕录制 | 可选 | 只用于生成悬停窗里的窗口缩略图 |
+| 屏幕录制（系统设置里叫「录屏与系统录音」） | 可选 | 只用于生成悬停窗里的窗口缩略图 |
 
 这些权限的能力范围很大，所以把 Macindows 实际做了什么说清楚：
 
@@ -151,6 +151,8 @@ open -n /Applications/Macindows.app --args --diagnose   # 结果写到 ~/Library
 open -n /Applications/Macindows.app --args --selftest   # 模拟一次悬停（会短暂移动鼠标），结果写到 selftest.txt
 build/Macindows.app/Contents/MacOS/Macindows --render-sample /tmp/macindows-sample   # 用假数据渲染悬停窗版面
 ```
+
+**权限开关已经打开，却不起作用？** 在系统设置对应的列表里选中 Macindows，点「−」删掉，再重新添加。这种情况出现在同一台 Mac 上先后装过自己编译的版本和发布版时：两者签名不同，系统把它们当成两个应用，旧的授权对不上新的。
 
 运行日志在 `~/Library/Logs/Macindows/macindows.log`。`--diagnose` 的输出会包含当前窗口的标题，同样只保存在本机；提交问题时请先自行检查再决定是否附上。
 

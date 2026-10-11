@@ -8,6 +8,13 @@ enum Thumbnailer {
     /// 让系统弹出授权请求。授权后通常要重新打开应用才生效。
     static func requestAccess() { _ = CGRequestScreenCaptureAccess() }
 
+    /// 系统的授权提示只在第一次请求时弹，之后（或者它根本没弹出来时）只能让用户自己去系统设置里打开
+    static func openSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     /// 截取一批窗口。先用公开的截屏接口；它对已最小化的窗口会失败（实测报「无法开始流播放」），
     /// 这些再直接向窗口服务器要画面——窗口服务器一直留着最小化窗口的画面。两种办法都拿不到的不会出现在结果里。
     static func capture(windowIDs: [CGWindowID], maxPixelSize: CGFloat = 560) async -> [CGWindowID: NSImage] {

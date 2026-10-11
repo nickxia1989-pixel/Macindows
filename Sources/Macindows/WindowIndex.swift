@@ -58,6 +58,8 @@ enum WindowIndex {
     }
 
     /// 切到指定窗口：先把它弄回屏幕上（取消隐藏、取消最小化），再提到最前。
+    /// 要在后台线程调用：窗口正在播放「从程序坞放回来」的动画时，目标 App 要等动画播完才答复，
+    /// 「提到最前」这一步会被卡住几百毫秒；放在主线程上的话，这期间悬停窗关不掉，鼠标也没人理。
     static func focus(_ window: AppWindow, of app: NSRunningApplication) {
         if app.isHidden { app.unhide() }
         if window.isMinimized { window.element.set(kAXMinimizedAttribute, kCFBooleanFalse) }
@@ -70,12 +72,15 @@ enum WindowIndex {
         window.element.set(kAXMainAttribute, kCFBooleanTrue)
         if !precise {
             // 退路：公开接口。会把这个 App 的所有窗口一起带到前面。
-            NSApp.yieldActivation(to: app)
-            app.activate(from: .current, options: [])
+            DispatchQueue.main.async {
+                NSApp.yieldActivation(to: app)
+                app.activate(from: .current, options: [])
+            }
         }
         log("focus \(app.localizedName ?? "?") window=\(window.id.map(String.init) ?? "-") precise=\(precise)")
     }
 
+    /// 同样要在后台线程调用：App 弹出「是否保存」之类的对话框时，这一步也可能迟迟不返回
     static func close(_ window: AppWindow) {
         if let button = window.element.element(kAXCloseButtonAttribute) {
             button.perform(kAXPressAction)

@@ -484,15 +484,16 @@ final class HoverController {
         }
         guard case .windows(_, let app, let snapshot)? = shown, snapshot.windows.indices.contains(index) else { return }
         let window = snapshot.windows[index]
+        // 先收起悬停窗，再去切窗口；切窗口放到后台线程，这样悬停窗一点就消失，不用等窗口的动画
         hide()
-        WindowIndex.focus(window, of: app)
+        DispatchQueue.global(qos: .userInteractive).async { WindowIndex.focus(window, of: app) }
     }
 
     private func close(_ index: Int) {
         guard case .windows(_, let app, let snapshot)? = shown, snapshot.windows.indices.contains(index) else { return }
         let window = snapshot.windows[index]
         log("close window \(window.id.map(String.init) ?? "-") of \(app.localizedName ?? "?")")
-        WindowIndex.close(window)
+        DispatchQueue.global(qos: .userInteractive).async { WindowIndex.close(window) }
         _ = timer(0.3) { [weak self] in self?.refresh() }
     }
 
@@ -500,10 +501,12 @@ final class HoverController {
     private func openWindow() {
         guard case .empty(let item, let app)? = shown else { return }
         hide()
-        let pressed = item.element.perform(kAXPressAction)
-        log("open window of \(item.title) via dock press=\(pressed)")
-        if !pressed, let url = app.bundleURL {
-            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+        DispatchQueue.global(qos: .userInteractive).async {
+            let pressed = item.element.perform(kAXPressAction)
+            log("open window of \(item.title) via dock press=\(pressed)")
+            if !pressed, let url = app.bundleURL {
+                NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+            }
         }
     }
 

@@ -15,6 +15,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Macindows"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# 各语言的界面文字
+cp -R Resources/*.lproj "$APP/Contents/Resources/"
 
 # 本机自用一律用开发证书（Apple Development）。发给别人的版本由 Scripts/release.sh 另外用 Developer ID 签名。
 # 两种签名在系统看来是两个不同的应用，混着装会让辅助功能等授权反复失效，所以这里不自动挑 Developer ID。

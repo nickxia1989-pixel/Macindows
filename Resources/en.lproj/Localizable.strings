@@ -1,0 +1,27 @@
+/* English strings, keyed by the Simplified Chinese text used in the source. */
+
+/* Menu bar menu */
+"启用 Macindows" = "Enable Macindows";
+"显示窗口缩略图" = "Show Window Thumbnails";
+"需要“屏幕录制”权限，授权后请重新打开 Macindows" = "Requires Screen Recording permission. Reopen Macindows after granting it.";
+"登录时自动启动" = "Launch at Login";
+"辅助功能权限：已授权" = "Accessibility: Granted";
+"辅助功能权限：未授权，点此打开系统设置" = "Accessibility: Not Granted. Click to Open System Settings";
+"点击拦截未能启动，请重新打开 Macindows" = "Click handling could not start. Please reopen Macindows.";
+"在访达中显示日志" = "Show Log in Finder";
+"退出 Macindows" = "Quit Macindows";
+"无法更改登录时自动启动" = "Couldn’t Change Launch at Login";
+
+/* First-launch permission window */
+"Macindows 需要“辅助功能”权限" = "Macindows Needs Accessibility Permission";
+"它用这项权限做四件事：知道鼠标停在程序坞的哪个图标上、列出各个 App 的窗口、切换到你选的窗口、在你点击程序坞图标时先看一眼。" = "It uses this permission for four things: knowing which Dock icon the pointer is on, listing each app’s windows, switching to the window you pick, and looking at your clicks on Dock icons before the Dock handles them.";
+"Macindows 不联网，不读取窗口里的内容。" = "Macindows never connects to the network and does not read what is inside your windows.";
+"打开系统设置 → 隐私与安全性 → 辅助功能，把 Macindows 的开关打开。" = "Open System Settings → Privacy & Security → Accessibility, then turn on Macindows.";
+"打开系统设置" = "Open System Settings";
+"正在等待授权…" = "Waiting for permission…";
+"已授权，Macindows 开始工作。" = "Permission granted. Macindows is now running.";
+
+/* Hover panel */
+"关闭窗口" = "Close Window";
+"还有 1 个窗口" = "1 more window";
+"还有 %d 个窗口" = "%d more windows";

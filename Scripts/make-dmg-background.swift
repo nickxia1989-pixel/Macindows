@@ -89,8 +89,11 @@ func drawBackground(in context: CGContext) {
     context.endTransparencyLayer()
     context.restoreGState()
 
-    drawText("把 Macindows 拖进「应用程序」", centerX: canvas.width / 2, baselineFromTop: 66, size: 21, weight: .semibold, alpha: 0.97)
-    drawText("首次打开后，请在「系统设置 › 隐私与安全性 › 辅助功能」中允许 Macindows", centerX: canvas.width / 2, baselineFromTop: 344, size: 12, weight: .regular, alpha: 0.82)
+    // 背景图没法跟着系统语言切换，所以中英文都写上
+    drawText("把 Macindows 拖进「应用程序」", centerX: canvas.width / 2, baselineFromTop: 58, size: 21, weight: .semibold, alpha: 0.97)
+    drawText("Drag Macindows into Applications", centerX: canvas.width / 2, baselineFromTop: 82, size: 13, weight: .regular, alpha: 0.85)
+    drawText("首次打开后，请在「系统设置 › 隐私与安全性 › 辅助功能」中允许 Macindows", centerX: canvas.width / 2, baselineFromTop: 330, size: 12, weight: .regular, alpha: 0.85)
+    drawText("On first launch, allow Macindows in System Settings › Privacy & Security › Accessibility", centerX: canvas.width / 2, baselineFromTop: 349, size: 11.5, weight: .regular, alpha: 0.78)
 }
 
 func render(scale: Int) -> Data {

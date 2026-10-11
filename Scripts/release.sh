@@ -25,6 +25,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Macindows"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# 各语言的界面文字
+cp -R Resources/*.lproj "$APP/Contents/Resources/"
 
 # 公证的两个硬性要求：加固运行时（--options runtime）和苹果时间戳服务器签发的时间戳（--timestamp）
 codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"

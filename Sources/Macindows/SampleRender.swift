@@ -30,6 +30,25 @@ enum SampleRender {
         write({ $0.configure(entries: empty, thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("empty-thumbnail.png"))
         write({ $0.configure(entries: empty, thumbnails: false, placeholder: nil, maxSize: room) }, appearance: .aqua, to: directory.appendingPathComponent("empty-list-light.png"))
         write({ $0.configure(entries: entries(30, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("thumbnails-30-falls-back-to-list.png"))
+        // 屏幕放不下全部窗口时，列表末尾会写「还有 N 个窗口」
+        write({ $0.configure(entries: entries(30, images: false), thumbnails: false, placeholder: nil, maxSize: CGSize(width: 2536, height: 420)) }, appearance: .darkAqua, to: directory.appendingPathComponent("list-overflow.png"))
+        writeOnboarding(to: directory.appendingPathComponent("onboarding.png"))
+    }
+
+    /// 首次启动时的权限引导窗口，用来检查各种界面语言下文字是否放得下
+    private static func writeOnboarding(to url: URL) {
+        let controller = OnboardingWindowController()
+        guard let window = controller.window, let content = window.contentView else { return }
+        window.appearance = NSAppearance(named: .aqua)
+        content.wantsLayer = true
+        content.layer?.backgroundColor = NSColor(white: 0.93, alpha: 1).cgColor
+        content.layoutSubtreeIfNeeded()
+        window.setContentSize(content.fittingSize)
+        content.layoutSubtreeIfNeeded()
+        content.displayIfNeeded()
+        guard let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { return }
+        content.cacheDisplay(in: content.bounds, to: bitmap)
+        try? bitmap.representation(using: .png, properties: [:])?.write(to: url)
     }
 
     /// 菜单栏图标：实际大小（2 倍屏）和放大 12 倍各一张，深浅两种底色

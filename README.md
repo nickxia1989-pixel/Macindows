@@ -76,6 +76,8 @@
 
 **系统要求**：macOS 26 或更新版本，Apple 芯片或 Intel 处理器。
 
+**界面语言**：简体中文、English，跟随系统语言。
+
 ## 权限与隐私
 
 | 权限 | 是否必需 | 用来做什么 |
@@ -105,7 +107,6 @@
 - 目前只在 macOS 27、Apple 芯片的机器上完整测试过。Intel 版本已包含在安装包里，但尚未实测。
 - 程序坞放在屏幕侧边时可以使用，但悬停窗与名称气泡之间的距离是估算的。
 - 位于其他桌面空间或处于全屏状态的窗口，表现尚未充分验证。
-- 界面目前只有简体中文。
 
 ## 从源码构建
 
@@ -118,6 +119,8 @@
 这条命令会编译、打包、签名，把 `Macindows.app` 放进「应用程序」并启动它。只想打包不安装的话用 `./Scripts/build-app.sh`，产物在 `build/Macindows.app`。本机没有开发证书时会使用临时签名，可以正常运行，只是每次重新编译后需要重新授权辅助功能。
 
 应用图标由 `swift Scripts/make-icon.swift Resources` 生成，菜单栏图标在代码里绘制（`Sources/Macindows/MenuBarIcon.swift`）。
+
+界面文字在代码里以简体中文书写，英文译文在 `Resources/en.lproj/Localizable.strings`，新增文字时两边要一起改。
 
 <details>
 <summary><b>打包成可以分发的安装镜像</b></summary>
@@ -158,7 +161,7 @@ build/Macindows.app/Contents/MacOS/Macindows --render-sample /tmp/macindows-samp
 | `Sources/MacindowsCore` | 点击规则、坐标换算等纯逻辑，带单元测试 |
 | `Sources/Macindows` | 应用本体 |
 | `Scripts` | 构建、安装、打包脚本，以及图标和安装镜像背景的绘制脚本 |
-| `Resources` | 应用图标、`Info.plist`、安装镜像背景 |
+| `Resources` | 应用图标、`Info.plist`、界面译文、安装镜像背景 |
 | `preview` | 定稿前用来比较方案的网页原型，仅作留档 |
 
 ## 许可证

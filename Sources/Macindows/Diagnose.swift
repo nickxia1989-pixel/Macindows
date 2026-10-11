@@ -17,6 +17,7 @@ enum Diagnose {
 
         add("Macindows 诊断 \(Date())")
         add("macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
+        add("界面语言: \(Bundle.main.preferredLocalizations.first ?? "未知")")
         add("辅助功能权限: \(Accessibility.isTrusted ? "已授权" : "未授权")")
         add("屏幕录制权限: \(Thumbnailer.isAuthorized ? "已授权" : "未授权")")
         add("登录时自动启动: \(SMAppService.mainApp.status == .enabled ? "已开启" : "未开启")")

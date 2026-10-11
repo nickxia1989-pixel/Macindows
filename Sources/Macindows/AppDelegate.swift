@@ -106,44 +106,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.removeAllItems()
         let trusted = Accessibility.isTrusted
 
-        let enabled = NSMenuItem(title: "启用 Macindows", action: #selector(toggleEnabled), keyEquivalent: "")
+        let enabled = NSMenuItem(title: L("启用 Macindows"), action: #selector(toggleEnabled), keyEquivalent: "")
         enabled.target = self
         enabled.state = defaults.bool(forKey: "enabled") ? .on : .off
         menu.addItem(enabled)
 
-        let thumbnails = NSMenuItem(title: "显示窗口缩略图", action: #selector(toggleThumbnails), keyEquivalent: "")
+        let thumbnails = NSMenuItem(title: L("显示窗口缩略图"), action: #selector(toggleThumbnails), keyEquivalent: "")
         thumbnails.target = self
         thumbnails.state = defaults.bool(forKey: "thumbnails") ? .on : .off
         menu.addItem(thumbnails)
         if defaults.bool(forKey: "thumbnails"), !Thumbnailer.isAuthorized {
-            let hint = NSMenuItem(title: "　需要“屏幕录制”权限，授权后请重新打开 Macindows", action: nil, keyEquivalent: "")
+            let hint = NSMenuItem(title: L("需要“屏幕录制”权限，授权后请重新打开 Macindows"), action: nil, keyEquivalent: "")
+            hint.indentationLevel = 1
             hint.isEnabled = false
             menu.addItem(hint)
         }
 
-        let login = NSMenuItem(title: "登录时自动启动", action: #selector(toggleLoginItem), keyEquivalent: "")
+        let login = NSMenuItem(title: L("登录时自动启动"), action: #selector(toggleLoginItem), keyEquivalent: "")
         login.target = self
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(login)
 
         menu.addItem(.separator())
-        let access = NSMenuItem(title: trusted ? "辅助功能权限：已授权" : "辅助功能权限：未授权，点此打开系统设置",
+        let access = NSMenuItem(title: trusted ? L("辅助功能权限：已授权") : L("辅助功能权限：未授权，点此打开系统设置"),
                                 action: trusted ? nil : #selector(openAccessibilitySettings), keyEquivalent: "")
         access.target = self
         access.isEnabled = !trusted
         menu.addItem(access)
         if trusted, running, !interceptor.isRunning {
-            let hint = NSMenuItem(title: "点击拦截未能启动，请重新打开 Macindows", action: nil, keyEquivalent: "")
+            let hint = NSMenuItem(title: L("点击拦截未能启动，请重新打开 Macindows"), action: nil, keyEquivalent: "")
             hint.isEnabled = false
             menu.addItem(hint)
         }
 
-        let logItem = NSMenuItem(title: "在访达中显示日志", action: #selector(revealLog), keyEquivalent: "")
+        let logItem = NSMenuItem(title: L("在访达中显示日志"), action: #selector(revealLog), keyEquivalent: "")
         logItem.target = self
         menu.addItem(logItem)
 
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "退出 Macindows", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: L("退出 Macindows"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
     @objc private func toggleEnabled() {
@@ -174,7 +175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } catch {
             log("login item change failed: \(error.localizedDescription)")
             let alert = NSAlert()
-            alert.messageText = "无法更改登录时自动启动"
+            alert.messageText = L("无法更改登录时自动启动")
             alert.informativeText = error.localizedDescription
             NSApp.activate(ignoringOtherApps: true)
             alert.runModal()

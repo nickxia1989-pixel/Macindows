@@ -82,11 +82,11 @@ final class PreviewItemView: NSView {
             addSubview(icon)
         }
 
-        closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "关闭窗口")
+        closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: L("关闭窗口"))
         closeButton.symbolConfiguration = .init(pointSize: 9, weight: .bold)
         closeButton.isBordered = false
         closeButton.contentTintColor = .secondaryLabelColor
-        closeButton.toolTip = "关闭窗口"
+        closeButton.toolTip = L("关闭窗口")
         closeButton.target = self
         closeButton.action = #selector(closeClicked)
         closeButton.isHidden = true
@@ -331,7 +331,7 @@ final class PreviewContentView: NSView {
             y += PreviewItemView.rowHeight
         }
         if remaining > 0 {
-            let more = NSTextField(labelWithString: "还有 \(remaining) 个窗口")
+            let more = NSTextField(labelWithString: remaining == 1 ? L("还有 1 个窗口") : String(format: L("还有 %d 个窗口"), remaining))
             more.font = .systemFont(ofSize: 12)
             more.textColor = .secondaryLabelColor
             more.frame = NSRect(x: Self.padding + 32, y: y + 6, width: rowWidth - 40, height: 16)

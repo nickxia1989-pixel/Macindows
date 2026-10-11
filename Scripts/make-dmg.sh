@@ -12,14 +12,9 @@ APP="$1"
 OUT="$2"
 VOLUME="Macindows"
 
-if [ -d "/Volumes/$VOLUME" ]; then
-  echo "已经挂载了一个叫 $VOLUME 的磁盘，先推出它再打包"
-  exit 1
-fi
-
 WORK="$(mktemp -d)"
-MOUNT="/Volumes/$VOLUME"
-trap '[ -d "$MOUNT" ] && hdiutil detach -quiet "$MOUNT"; rm -rf "$WORK"' EXIT
+MOUNT=""
+trap '[ -n "$MOUNT" ] && [ -d "$MOUNT" ] && hdiutil detach -quiet "$MOUNT"; rm -rf "$WORK"' EXIT
 STAGE="$WORK/stage"
 mkdir -p "$STAGE/.background"
 ditto "$APP" "$STAGE/Macindows.app"
@@ -28,12 +23,18 @@ cp Resources/dmg-background.tiff "$STAGE/.background/background.tiff"
 
 # 先做一个可写的镜像，挂载后让访达摆好版面，再压成只读的成品
 hdiutil create -quiet -srcfolder "$STAGE" -volname "$VOLUME" -fs HFS+ -format UDRW -ov "$WORK/rw.dmg"
-hdiutil attach -quiet -readwrite -noverify -noautoopen "$WORK/rw.dmg"
+# 挂载点由系统决定：如果已经挂着一个同名的磁盘（比如上一版的安装镜像还没推出），这里会是「/Volumes/Macindows 1」。
+# 所以下面一律按挂载路径找这块磁盘，不按名字找
+MOUNT="$(hdiutil attach -readwrite -noverify -noautoopen "$WORK/rw.dmg" | grep -o '/Volumes/.*$')"
+if [ ! -d "$MOUNT" ]; then
+  echo "镜像挂载失败"
+  exit 1
+fi
 
 # 窗口内容区 660x400，上面再加 32 的标题栏
 osascript <<EOF
 tell application "Finder"
-  tell disk "$VOLUME"
+  tell item (POSIX file "$MOUNT/" as alias)
     open
     tell container window
       set current view to icon view

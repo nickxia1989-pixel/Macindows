@@ -19,6 +19,20 @@
 
 应用图标由 `swift Scripts/make-icon.swift Resources` 生成，菜单栏图标在代码里绘制（`Sources/Macindows/MenuBarIcon.swift`）。
 
+## 分发给别人
+
+```bash
+./Scripts/release.sh
+```
+
+产物是 `dist/Macindows.zip`：同时支持苹果芯片和 Intel，用 Developer ID 证书签名并经过苹果公证，对方解压后双击就能打开。需要钥匙串里有 Developer ID Application 证书，并且事先保存过一次公证凭据（之后不用再输）：
+
+```bash
+xcrun notarytool store-credentials "macindows-notary" --apple-id "<苹果账号邮箱>" --team-id <团队编号>
+```
+
+没保存凭据时脚本只签名不公证。本机安装的版本仍然用 `install.sh`，两者签名不同，混用会让系统要求重新授权辅助功能。
+
 ## 排查
 
 ```bash

@@ -16,12 +16,15 @@ cp "$BIN" "$APP/Contents/MacOS/Macindows"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
-IDENTITY="${CODESIGN_IDENTITY:-$(security find-identity -v -p codesigning | awk -F'"' '/Apple Development|Developer ID Application/ {print $2; exit}')}"
+# 本机自用一律用开发证书（Apple Development）。发给别人的版本由 Scripts/release.sh 另外用 Developer ID 签名。
+# 两种签名在系统看来是两个不同的应用，混着装会让辅助功能等授权反复失效，所以这里不自动挑 Developer ID。
+IDENTITY="${CODESIGN_IDENTITY:-$(security find-identity -v -p codesigning | awk -F'"' '/Apple Development/ {print $2; exit}')}"
 if [ -n "$IDENTITY" ]; then
-  codesign --force --sign "$IDENTITY" --timestamp=none "$APP"
+  # --options runtime：开启「加固运行时」。公证要求它，本机版本也一并开启，这样自用和分发的行为一致
+  codesign --force --options runtime --sign "$IDENTITY" --timestamp=none "$APP"
   echo "已签名: $IDENTITY"
 else
   codesign --force --sign - "$APP"
-  echo "没找到开发者证书，使用临时签名（每次重编后需要重新授权辅助功能）"
+  echo "没找到开发证书，使用临时签名（每次重编后需要重新授权辅助功能）"
 fi
 echo "$APP"

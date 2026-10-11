@@ -161,6 +161,17 @@ final class PreviewItemView: NSView {
 final class GlassRimView: NSView {
     var cornerRadius: CGFloat = 16 { didSet { needsLayout = true } }
 
+    /// 一套高光的强度。sheen 是面上的「顶部提亮、底部压暗」，rim 是边缘那圈亮线从上到下四个位置的亮度
+    struct Look {
+        var sheenTop: CGFloat
+        var sheenBottom: CGFloat
+        var rim: [CGFloat]
+    }
+
+    var darkLook = Look(sheenTop: 0.10, sheenBottom: 0.08, rim: [0.46, 0.16, 0.06, 0.18]) { didSet { needsLayout = true } }
+    // 浅色下面上的提亮必须很淡：稍重一点就像蒙了一层白雾，玻璃后面的颜色透不出来（实测对比过）
+    var lightLook = Look(sheenTop: 0.06, sheenBottom: 0.03, rim: [0.85, 0.4, 0.18, 0.35]) { didSet { needsLayout = true } }
+
     private let sheen = CAGradientLayer()
     private let sheenMask = CAShapeLayer()
     private let rim = CAGradientLayer()
@@ -201,10 +212,11 @@ final class GlassRimView: NSView {
         let radius = max(0, cornerRadius - 0.5)
         rimMask.path = CGPath(roundedRect: inset, cornerWidth: radius, cornerHeight: radius, transform: nil)
         // 面：上沿略亮，下沿略暗
-        sheen.colors = dark ? [white(0.10), white(0), black(0.08)] : [white(0.35), white(0), black(0.03)]
+        let look = dark ? darkLook : lightLook
+        sheen.colors = [white(look.sheenTop), white(0), black(look.sheenBottom)]
         sheen.locations = [0, 0.55, 1]
         // 边：顶上一道亮线，两侧淡下去，底边留一点反光
-        rim.colors = dark ? [white(0.46), white(0.16), white(0.06), white(0.18)] : [white(0.95), white(0.6), white(0.35), white(0.6)]
+        rim.colors = look.rim.map(white)
         rim.locations = [0, 0.3, 0.72, 1]
         CATransaction.commit()
     }

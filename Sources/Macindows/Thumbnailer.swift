@@ -6,7 +6,15 @@ enum Thumbnailer {
     static var isAuthorized: Bool { CGPreflightScreenCaptureAccess() }
 
     /// 让系统弹出授权请求。授权后通常要重新打开应用才生效。
-    static func requestAccess() { _ = CGRequestScreenCaptureAccess() }
+    /// 实测只调 CGRequestScreenCaptureAccess 时，系统有时既不弹窗、也不把应用登记进系统设置的列表，
+    /// 所以再实际向截屏接口要一次内容：没有权限时这次调用会失败，但这是系统登记并询问用户的另一条路。
+    static func requestAccess() {
+        let granted = CGRequestScreenCaptureAccess()
+        log("screen recording request: granted=\(granted)")
+        SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { content, error in
+            log("screen recording probe: " + (error.map { "failed \(($0 as NSError).domain) \(($0 as NSError).code)" } ?? "ok, \(content?.windows.count ?? 0) windows"))
+        }
+    }
 
     /// 系统的授权提示只在第一次请求时弹，之后（或者它根本没弹出来时）只能让用户自己去系统设置里打开
     static func openSettings() {

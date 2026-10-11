@@ -164,7 +164,6 @@ build/Macindows.app/Contents/MacOS/Macindows --render-sample /tmp/macindows-samp
 | `Sources/Macindows` | 应用本体 |
 | `Scripts` | 构建、安装、打包脚本，以及图标和安装镜像背景的绘制脚本 |
 | `Resources` | 应用图标、`Info.plist`、界面译文、安装镜像背景 |
-| `preview` | 定稿前用来比较方案的网页原型，仅作留档 |
 
 ## 许可证
 

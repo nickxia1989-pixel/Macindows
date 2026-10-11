@@ -164,7 +164,6 @@ The running log is at `~/Library/Logs/Macindows/macindows.log`. The output of `-
 | `Sources/Macindows` | The app itself |
 | `Scripts` | Build, install and packaging scripts, plus the scripts that draw the icon and the disk image background |
 | `Resources` | App icon, `Info.plist`, translations, disk image background |
-| `preview` | A web prototype used to compare designs before the app was written, kept for reference |
 
 ## License
 

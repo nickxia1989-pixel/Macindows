@@ -1,13 +1,14 @@
 <div align="center">
   <img src="docs/images/icon.png" width="128" alt="Macindows 图标">
   <h1>Macindows</h1>
-  <p><b>给 macOS 程序坞补上窗口预览和 Windows 任务栏式的点击切换。<br>除此之外，什么都不动。</b></p>
+  <p><b>为程序坞添一分实用，不减一分优雅。</b><br>悬停看窗口，点击即切换。</p>
   <p>
     <img src="https://img.shields.io/badge/macOS-26%2B-000000?logo=apple&logoColor=white" alt="macOS 26 及以上">
     <img src="https://img.shields.io/badge/架构-Apple%20芯片%20%7C%20Intel-2b86f2" alt="Apple 芯片与 Intel">
     <img src="https://img.shields.io/badge/签名-Developer%20ID%20已公证-28c840" alt="Developer ID 签名并经过公证">
     <img src="https://img.shields.io/badge/联网-从不-555555" alt="从不联网">
   </p>
+  <p><b>简体中文</b> · <a href="README.en.md">English</a></p>
   <p>
     <a href="https://github.com/nickxia1989-pixel/Macindows/releases/latest"><b>下载</b></a> ·
     <a href="#理念">理念</a> ·
@@ -24,15 +25,11 @@
 
 ## 理念
 
-macOS 的程序坞很好看，但它只告诉你「哪些应用开着」，不告诉你「开着哪些窗口」。Windows 的任务栏在这一点上更实用：悬停能看到窗口，点一下就能切换或收起。
+程序坞很美，只是不够实用。Macindows 补上这一点，别的都不碰。
 
-Macindows 想把这份实用带到 Mac 上，同时不破坏程序坞原本的样子。三条原则：
-
-**一、用最小的改动。** 只增加两件事：悬停看窗口，点击按 Windows 任务栏的规则切换。不替换程序坞，不另起一条任务栏，不修改、不注入程序坞本身。
-
-**二、保留程序坞的优雅与简洁。** 程序坞的外观、动画、右键菜单、名称气泡全部原样保留。悬停窗使用系统原生的液态玻璃材质，停在名称气泡的上方，不遮挡任何东西。退出 Macindows，一切立刻回到原样。
-
-**三、隐私留在本机。** 为了实现功能，Macindows 需要系统权限，但所有数据都只在你的 Mac 上处理：不联网，没有统计，没有账号。详见[权限与隐私](#权限与隐私)。
+- **最小改动**：只加悬停预览和点击切换，不替换、不修改程序坞。
+- **保持原貌**：程序坞的外观与操作一切照旧，退出即还原。
+- **数据不出本机**：需要系统权限，但不联网，没有统计，没有账号。
 
 ## 功能
 

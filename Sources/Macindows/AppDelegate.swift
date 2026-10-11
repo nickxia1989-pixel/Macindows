@@ -74,10 +74,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .passThrough:
             hover.dockClickPassedThrough()
             return .passThrough
-        case .hideApp:
+        case .minimizeWindow:
+            guard let window = snapshot.windows.first else { return .passThrough }
             return .intercept { [weak self] in
                 self?.hover.hide()
-                app.hide()
+                // 放到后台线程：窗口播放最小化动画期间，这一步可能迟迟不返回
+                DispatchQueue.global(qos: .userInteractive).async { window.element.set(kAXMinimizedAttribute, kCFBooleanTrue) }
+            }
+        case .restoreWindow:
+            guard let window = snapshot.windows.first else { return .passThrough }
+            return .intercept { [weak self] in
+                self?.hover.hide()
+                DispatchQueue.global(qos: .userInteractive).async { WindowIndex.focus(window, of: app) }
             }
         case .showWindowList:
             return .intercept { [weak self] in self?.hover.showPinned(for: item, app: app) }

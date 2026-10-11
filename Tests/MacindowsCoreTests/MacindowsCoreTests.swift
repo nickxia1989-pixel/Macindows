@@ -14,17 +14,23 @@ final class ClickPolicyTests: XCTestCase {
         XCTAssertEqual(dockClickAction(for: state(front: true, windows: 0)), .passThrough)
     }
 
-    func testSingleWindowFrontmostGetsHidden() {
-        XCTAssertEqual(dockClickAction(for: state(front: true, windows: 1)), .hideApp)
+    func testSingleWindowFrontmostGetsMinimized() {
+        XCTAssertEqual(dockClickAction(for: state(front: true, windows: 1)), .minimizeWindow)
     }
 
     func testSingleWindowInBackgroundIsActivatedByTheDock() {
         XCTAssertEqual(dockClickAction(for: state(front: false, windows: 1)), .passThrough)
     }
 
-    func testSingleWindowOffScreenIsRestoredByTheDock() {
-        XCTAssertEqual(dockClickAction(for: state(front: true, windows: 1, minimized: 1)), .passThrough)
+    func testSingleMinimizedWindowIsRestored() {
+        // 最小化之后这个 App 往往仍是「最前」的那个，再点一下要能放回来；它不在最前时也一样
+        XCTAssertEqual(dockClickAction(for: state(front: true, windows: 1, minimized: 1)), .restoreWindow)
+        XCTAssertEqual(dockClickAction(for: state(front: false, windows: 1, minimized: 1)), .restoreWindow)
+    }
+
+    func testHiddenAppIsShownByTheDock() {
         XCTAssertEqual(dockClickAction(for: state(front: false, hidden: true, windows: 1)), .passThrough)
+        XCTAssertEqual(dockClickAction(for: state(front: false, hidden: true, windows: 1, minimized: 1)), .passThrough)
     }
 
     func testMultipleWindowsAlwaysShowTheList() {

@@ -2,8 +2,10 @@
 public enum DockClickAction: Equatable {
     /// 不干预，交给程序坞按系统原样处理
     case passThrough
-    /// 截下点击，隐藏这个 App（等同 ⌘H）
-    case hideApp
+    /// 截下点击，把这个 App 唯一的窗口最小化
+    case minimizeWindow
+    /// 截下点击，把这个 App 唯一的、已经最小化的窗口放回来
+    case restoreWindow
     /// 截下点击，弹出这个 App 的窗口列表
     case showWindowList
 }
@@ -26,14 +28,17 @@ public struct AppWindowState: Equatable {
 }
 
 /// 规则与 Windows 合并任务栏一致：
-/// 多个窗口只列出来让用户挑；单个窗口则「切过去 / 已是当前就收起 / 不在屏幕上就放回来」。
-/// 凡是程序坞原生就能做对的情况都不截，只截系统做不到的两种。
+/// 多个窗口只列出来让用户挑；单个窗口则「切过去 / 已是当前就最小化 / 最小化了就放回来」。
+/// 程序坞原生就能做对的情况（启动、切到后台的 App、取消隐藏）不截。
 public func dockClickAction(for s: AppWindowState) -> DockClickAction {
     guard s.isRunning else { return .passThrough }
     if s.windowCount >= 2 { return .showWindowList }
     guard s.windowCount == 1 else { return .passThrough }
-    if s.isHidden || s.minimizedCount >= 1 { return .passThrough }
-    return s.isFrontmost ? .hideApp : .passThrough
+    // 整个 App 被隐藏（⌘H）时点图标，程序坞自己会把它显示出来
+    if s.isHidden { return .passThrough }
+    // 唯一的窗口最小化了：自己放回来。程序坞对有些 App 也会这么做，但不是每个 App 都如此，自己做才能保证来回一致
+    if s.minimizedCount >= 1 { return .restoreWindow }
+    return s.isFrontmost ? .minimizeWindow : .passThrough
 }
 
 /// 辅助功能报告的一个窗口要不要列出来。

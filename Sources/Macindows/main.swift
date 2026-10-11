@@ -14,6 +14,12 @@ if arguments.contains("--selftest") {
     exit(0)
 }
 
+if arguments.contains("--check-hover") {
+    _ = NSApplication.shared
+    print(SampleRender.checkHover().joined(separator: "\n"))
+    exit(0)
+}
+
 if arguments.contains("--diagnose") {
     Diagnose.run()
     exit(0)

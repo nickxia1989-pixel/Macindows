@@ -36,7 +36,6 @@ final class PreviewItemView: NSView {
     private let titleLabel = NSTextField(labelWithString: "")
     private let thumbView = NSImageView()
     private let closeButton = FirstMouseButton()
-    private var tracking: NSTrackingArea?
 
     init(entry: PreviewEntry, thumbBound: CGSize?, placeholder: NSImage?) {
         self.entry = entry
@@ -126,17 +125,6 @@ final class PreviewItemView: NSView {
         return hit === closeButton ? hit : self
     }
 
-    // 应用本身从不处于激活状态，所以追踪区域必须是「始终有效」的
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let tracking { removeTrackingArea(tracking) }
-        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
-        addTrackingArea(area)
-        tracking = area
-    }
-
-    override func mouseEntered(with event: NSEvent) { setHovering(true) }
-    override func mouseExited(with event: NSEvent) { setHovering(false) }
     override func mouseDown(with event: NSEvent) {}
 
     override func mouseUp(with event: NSEvent) {
@@ -150,9 +138,13 @@ final class PreviewItemView: NSView {
 
     @objc private func closeClicked() { onClose?() }
 
-    private func setHovering(_ hovering: Bool) {
-        highlight.layer?.backgroundColor = (hovering ? NSColor.labelColor.withAlphaComponent(0.1) : .clear).cgColor
-        closeButton.isHidden = !hovering || entry.isPlaceholder
+    /// 鼠标是否正停在这一项上。由容器按鼠标位置统一设置
+    var isHighlighted = false {
+        didSet {
+            guard isHighlighted != oldValue else { return }
+            highlight.layer?.backgroundColor = (isHighlighted ? NSColor.labelColor.withAlphaComponent(0.1) : .clear).cgColor
+            closeButton.isHidden = !isHighlighted || entry.isPlaceholder
+        }
     }
 }
 
@@ -233,6 +225,7 @@ final class PreviewContentView: NSView {
     var onClose: ((Int) -> Void)?
     private(set) var items: [PreviewItemView] = []
     private var extras: [NSView] = []
+    private var tracking: NSTrackingArea?
 
     override var isFlipped: Bool { true }
 
@@ -254,8 +247,47 @@ final class PreviewContentView: NSView {
             item.onClose = { [weak self] in self?.onClose?(index) }
         }
         setFrameSize(result)
+        // 内容是整批重建的（缩略图到了、标题变了都会重建），新建出来的条目不会收到「鼠标进入」，
+        // 所以重建之后要按鼠标当前的位置把高亮补上，否则鼠标明明停在上面却不亮
+        refreshHover()
         return result
     }
+
+    // MARK: 鼠标悬停的高亮
+    //
+    // 不依赖每个条目各自的「进入 / 离开」事件：那种事件只在越过边界的一刻触发，条目一重建或鼠标移动得快就会漏。
+    // 改为只看鼠标此刻在哪——在哪一项的范围里就亮哪一项。
+
+    /// point 是窗口坐标；传 nil 表示鼠标不在这里
+    func updateHover(windowPoint: NSPoint?) {
+        let point = windowPoint.map { convert($0, from: nil) }
+        for item in items {
+            item.isHighlighted = point.map { item.frame.contains($0) } ?? false
+        }
+    }
+
+    /// 按鼠标当前的实际位置重新确定高亮
+    func refreshHover() {
+        guard let window else {
+            updateHover(windowPoint: nil)
+            return
+        }
+        let point = window.mouseLocationOutsideOfEventStream
+        updateHover(windowPoint: bounds.contains(convert(point, from: nil)) ? point : nil)
+    }
+
+    // 应用本身从不处于激活状态，所以追踪区域必须是「始终有效」的
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { updateHover(windowPoint: event.locationInWindow) }
+    override func mouseMoved(with event: NSEvent) { updateHover(windowPoint: event.locationInWindow) }
+    override func mouseExited(with event: NSEvent) { updateHover(windowPoint: nil) }
 
     /// 横向一排，窗口多了就整体缩小；缩到最小还放不下则返回 nil，由调用方改用列表。
     private func layoutCells(_ entries: [PreviewEntry], placeholder: NSImage?, maxWidth: CGFloat) -> NSSize? {

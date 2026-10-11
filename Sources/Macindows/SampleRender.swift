@@ -57,6 +57,30 @@ enum SampleRender {
         }
     }
 
+    /// `--check-hover`：检查高亮是否跟着鼠标位置走、内容重建后是否还在。返回逐项结果
+    static func checkHover() -> [String] {
+        let entries = (0..<4).map { PreviewEntry(title: "窗口 \($0)", isCurrent: $0 == 0, aspect: 1.5, thumbnail: nil) }
+        let content = PreviewContentView()
+        let size = content.configure(entries: entries, thumbnails: true, placeholder: nil, maxSize: CGSize(width: 2000, height: 1000))
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = content
+        func highlighted() -> [Int] { content.items.enumerated().filter { $0.element.isHighlighted }.map(\.offset) }
+        func center(of index: Int) -> NSPoint { let f = content.items[index].frame; return content.convert(NSPoint(x: f.midX, y: f.midY), to: nil) }
+        var results: [String] = []
+        func expect(_ label: String, _ actual: [Int], _ wanted: [Int]) { results.append("\(actual == wanted ? "通过" : "失败")  \(label)：亮着的是 \(actual)，应为 \(wanted)") }
+
+        content.updateHover(windowPoint: center(of: 1)); expect("移到第 2 项", highlighted(), [1])
+        content.updateHover(windowPoint: center(of: 3)); expect("移到第 4 项", highlighted(), [3])
+        content.updateHover(windowPoint: center(of: 0)); expect("来回：移回第 1 项", highlighted(), [0])
+        content.updateHover(windowPoint: center(of: 2)); expect("来回：移到第 3 项", highlighted(), [2])
+        // 内容重建（比如缩略图到了）：重建后按同一位置补上高亮
+        let point = center(of: 2)
+        content.configure(entries: entries, thumbnails: true, placeholder: nil, maxSize: CGSize(width: 2000, height: 1000))
+        content.updateHover(windowPoint: point); expect("内容重建后仍停在第 3 项", highlighted(), [2])
+        content.updateHover(windowPoint: nil); expect("鼠标离开", highlighted(), [])
+        return results
+    }
+
     private static func sampleImage(aspect: CGFloat, hue: CGFloat) -> NSImage {
         let size = NSSize(width: 400 * aspect, height: 400)
         return NSImage(size: size, flipped: false) { rect in

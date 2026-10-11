@@ -120,6 +120,8 @@ final class HoverController {
 
     /// 按鼠标当前位置决定悬停窗的去留。location 是 AppKit 坐标，point 是同一位置的左上角原点坐标。
     private func evaluate(location: NSPoint, point: CGPoint, honoringAim: Bool = true) {
+        // 悬停窗里哪一项该亮，每次鼠标移动都按实际位置重新确定一遍（和窗口自己收到的鼠标事件互为备份）
+        if panel.isVisible { panel.content.refreshHover() }
         // 鼠标已经移进悬停窗，或正在从图标移向它的空隙里：保持显示
         if panel.isVisible, panel.cardFrame.insetBy(dx: -4, dy: -4).contains(location) || bridge.contains(location) {
             cancelHide()

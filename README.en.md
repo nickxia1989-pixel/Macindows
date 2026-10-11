@@ -7,6 +7,7 @@
     <img src="https://img.shields.io/badge/arch-Apple%20silicon%20%7C%20Intel-2b86f2" alt="Apple silicon and Intel">
     <img src="https://img.shields.io/badge/signed-Developer%20ID%2C%20notarized-28c840" alt="Signed with Developer ID and notarized">
     <img src="https://img.shields.io/badge/network-never-555555" alt="Never connects to the network">
+    <img src="https://img.shields.io/badge/license-MIT-8a8a8a" alt="MIT License">
   </p>
   <p><a href="README.md">简体中文</a> · <b>English</b></p>
   <p>
@@ -162,6 +163,10 @@ The running log is at `~/Library/Logs/Macindows/macindows.log`. The output of `-
 | `Scripts` | Build, install and packaging scripts, plus the scripts that draw the icon and the disk image background |
 | `Resources` | App icon, `Info.plist`, disk image background |
 | `preview` | A web prototype used to compare designs before the app was written, kept for reference |
+
+## License
+
+Macindows is released under the [MIT License](LICENSE).
 
 ---
 

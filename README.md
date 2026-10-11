@@ -7,6 +7,7 @@
     <img src="https://img.shields.io/badge/架构-Apple%20芯片%20%7C%20Intel-2b86f2" alt="Apple 芯片与 Intel">
     <img src="https://img.shields.io/badge/签名-Developer%20ID%20已公证-28c840" alt="Developer ID 签名并经过公证">
     <img src="https://img.shields.io/badge/联网-从不-555555" alt="从不联网">
+    <img src="https://img.shields.io/badge/许可证-MIT-8a8a8a" alt="MIT 许可证">
   </p>
   <p><b>简体中文</b> · <a href="README.en.md">English</a></p>
   <p>
@@ -159,6 +160,10 @@ build/Macindows.app/Contents/MacOS/Macindows --render-sample /tmp/macindows-samp
 | `Scripts` | 构建、安装、打包脚本，以及图标和安装镜像背景的绘制脚本 |
 | `Resources` | 应用图标、`Info.plist`、安装镜像背景 |
 | `preview` | 定稿前用来比较方案的网页原型，仅作留档 |
+
+## 许可证
+
+Macindows 以 [MIT 许可证](LICENSE) 发布。
 
 ---
 

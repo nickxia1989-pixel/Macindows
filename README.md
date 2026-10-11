@@ -1,11 +1,115 @@
-# Macindows
+<div align="center">
+  <img src="docs/images/icon.png" width="128" alt="Macindows 图标">
+  <h1>Macindows</h1>
+  <p><b>给 macOS 程序坞补上窗口预览和 Windows 任务栏式的点击切换。<br>除此之外，什么都不动。</b></p>
+  <p>
+    <img src="https://img.shields.io/badge/macOS-26%2B-000000?logo=apple&logoColor=white" alt="macOS 26 及以上">
+    <img src="https://img.shields.io/badge/架构-Apple%20芯片%20%7C%20Intel-2b86f2" alt="Apple 芯片与 Intel">
+    <img src="https://img.shields.io/badge/签名-Developer%20ID%20已公证-28c840" alt="Developer ID 签名并经过公证">
+    <img src="https://img.shields.io/badge/联网-从不-555555" alt="从不联网">
+  </p>
+  <p>
+    <a href="https://github.com/nickxia1989-pixel/Macindows/releases/latest"><b>下载</b></a> ·
+    <a href="#理念">理念</a> ·
+    <a href="#功能">功能</a> ·
+    <a href="#安装">安装</a> ·
+    <a href="#权限与隐私">权限与隐私</a> ·
+    <a href="#从源码构建">从源码构建</a>
+  </p>
+</div>
 
-给 macOS 程序坞补上两件事，程序坞本身不被修改：
+<p align="center">
+  <img src="docs/images/hover.png" width="804" alt="鼠标悬停在程序坞图标上，弹出这个应用的全部窗口">
+</p>
 
-- **悬停**在程序坞里某个 App 的图标上，弹出它的全部窗口（开着的、隐藏的、最小化的），点哪个切到哪个。窗口按打开的先后排成一排，多了整体缩小，再多就改成标题列表。App 在运行但一个窗口都没开时，弹一个同样大小的占位卡片，点它开一个窗口。
-- **点击**图标的规则与 Windows 合并任务栏一致：App 只有一个窗口时，点一下切过去，已经是当前窗口就最小化，最小化了再点就放回来；有多个窗口时只弹出窗口列表。
+## 理念
 
-## 构建与安装
+macOS 的程序坞很好看，但它只告诉你「哪些应用开着」，不告诉你「开着哪些窗口」。Windows 的任务栏在这一点上更实用：悬停能看到窗口，点一下就能切换或收起。
+
+Macindows 想把这份实用带到 Mac 上，同时不破坏程序坞原本的样子。三条原则：
+
+**一、用最小的改动。** 只增加两件事：悬停看窗口，点击按 Windows 任务栏的规则切换。不替换程序坞，不另起一条任务栏，不修改、不注入程序坞本身。
+
+**二、保留程序坞的优雅与简洁。** 程序坞的外观、动画、右键菜单、名称气泡全部原样保留。悬停窗使用系统原生的液态玻璃材质，停在名称气泡的上方，不遮挡任何东西。退出 Macindows，一切立刻回到原样。
+
+**三、隐私留在本机。** 为了实现功能，Macindows 需要系统权限，但所有数据都只在你的 Mac 上处理：不联网，没有统计，没有账号。详见[权限与隐私](#权限与隐私)。
+
+## 功能
+
+### 悬停：一眼看到所有窗口
+
+把鼠标停在程序坞里任意一个应用的图标上：
+
+- **列出这个应用的全部窗口**，包括开着的、被隐藏的、已经最小化的。点哪个，切到哪个。
+- **窗口按打开的先后排成一排**，顺序不会因为切换而变化。窗口多了整体缩小，再多就改成标题列表。
+- **缩略图可选**。不想授予屏幕录制权限的话，悬停窗只显示窗口标题，其他功能不受影响。
+- **应用在运行但没有窗口时**，显示一张同样大小的占位卡片，点一下打开新窗口。
+- **可以直接关闭窗口**：悬停窗里每个窗口都有关闭按钮，也可以用鼠标中键点击。
+- **不容易误触**：从图标移向悬停窗的途中划过别的图标，不会让悬停窗切走。
+
+### 点击：与 Windows 合并任务栏相同的规则
+
+| 应用的状态 | 点一下图标 |
+| --- | --- |
+| 只有一个窗口，不在最前 | 切到这个窗口 |
+| 只有一个窗口，已经在最前 | 最小化 |
+| 只有一个窗口，已经最小化 | 放回来 |
+| 有多个窗口 | 弹出窗口列表，点哪个切到哪个 |
+| 没有运行，或没有窗口 | 交给程序坞，与系统原有行为一致 |
+
+右键菜单等程序坞原有的操作仍然由程序坞自己处理，菜单弹出时悬停窗会自动让开。
+
+### 菜单栏
+
+菜单栏上的四格窗图标里可以：暂停或启用 Macindows、开关窗口缩略图、设置登录时自动启动、查看权限状态、打开日志所在位置、退出。
+
+## 安装
+
+1. 在 [Releases](https://github.com/nickxia1989-pixel/Macindows/releases/latest) 下载 `Macindows.dmg`。
+2. 打开它，把 Macindows 拖进「应用程序」。
+3. 启动 Macindows，按提示在「系统设置 › 隐私与安全性 › 辅助功能」中允许它。
+4. 想看窗口缩略图的话，在菜单栏图标里打开「显示窗口缩略图」，再授予「屏幕录制」权限。
+
+<p align="center">
+  <img src="docs/images/install.png" width="560" alt="打开安装镜像后，把 Macindows 拖进「应用程序」">
+</p>
+
+安装包使用 Developer ID 签名并经过 Apple 公证，打开时不会被系统拦截。
+
+**系统要求**：macOS 26 或更新版本，Apple 芯片或 Intel 处理器。
+
+## 权限与隐私
+
+| 权限 | 是否必需 | 用来做什么 |
+| --- | --- | --- |
+| 辅助功能 | 必需 | 判断鼠标停在程序坞的哪个图标上；列出、切换、最小化、关闭窗口；识别对程序坞图标的点击 |
+| 屏幕录制 | 可选 | 只用于生成悬停窗里的窗口缩略图 |
+
+这些权限的能力范围很大，所以把 Macindows 实际做了什么说清楚：
+
+- **不联网。** 代码里没有任何网络请求：没有统计，没有崩溃上报，没有自动更新检查，没有账号。
+- **缩略图只存在于内存。** 画面用来显示在悬停窗里，不写入磁盘，不离开本机。
+- **只在本机保存两样东西。** 一是两项设置（是否启用、是否显示缩略图）；二是一份排查问题用的日志，位于 `~/Library/Logs/Macindows/`，只记录应用名称和窗口数量，不含窗口标题和画面，超过约 512 KB 自动清理。
+- **键盘输入不在监听范围内。** 只监听鼠标的移动和点击，并且只处理落在程序坞图标上的左键点击。
+- **可以自行验证。** 全部源码都在这个仓库里，可以对照上面每一条逐项检查，也可以自己编译使用。
+
+## 工作原理
+
+- **读取程序坞**：通过系统的辅助功能接口获取程序坞里各个图标的位置和对应的应用，程序坞进程本身不被修改或注入，也不需要关闭系统完整性保护。
+- **悬停窗**：Macindows 自己的一个浮动窗口，摆在图标上方。它和程序坞是两个独立的东西。
+- **点击规则**：监听对程序坞图标的点击，按上面的表格决定是自己处理，还是原样交还给程序坞。
+
+需要说明的一点：为了精确切换到指定窗口，以及给最小化的窗口生成缩略图，Macindows 用到了少量未公开的系统接口。每一处都有回退方案，但 macOS 大版本更新后可能需要适配，这也是它无法上架 Mac App Store 的原因。
+
+## 已知限制
+
+- 只支持 macOS 26 及以上，因为悬停窗使用了这一代系统的液态玻璃材质。
+- 目前只在 macOS 27、Apple 芯片的机器上完整测试过。Intel 版本已包含在安装包里，但尚未实测。
+- 程序坞放在屏幕侧边时可以使用，但悬停窗与名称气泡之间的距离是估算的。
+- 位于其他桌面空间或处于全屏状态的窗口，表现尚未充分验证。
+- 界面目前只有简体中文。
+
+## 从源码构建
 
 需要 macOS 26 或更新版本，以及 Xcode 命令行工具。
 
@@ -13,41 +117,52 @@
 ./Scripts/install.sh
 ```
 
-这条命令会编译、打包、签名，把 `Macindows.app` 放进「应用程序」目录并启动它。只想打包不安装的话用 `./Scripts/build-app.sh`，产物在 `build/Macindows.app`。
-
-首次运行要在「系统设置 → 隐私与安全性 → 辅助功能」里打开 Macindows。菜单栏会出现一个四格窗图标，可以在那里暂停、开启窗口缩略图（需要「屏幕录制」权限）、设置登录时自动启动或退出。
+这条命令会编译、打包、签名，把 `Macindows.app` 放进「应用程序」并启动它。只想打包不安装的话用 `./Scripts/build-app.sh`，产物在 `build/Macindows.app`。本机没有开发证书时会使用临时签名，可以正常运行，只是每次重新编译后需要重新授权辅助功能。
 
 应用图标由 `swift Scripts/make-icon.swift Resources` 生成，菜单栏图标在代码里绘制（`Sources/Macindows/MenuBarIcon.swift`）。
 
-## 分发给别人
+<details>
+<summary><b>打包成可以分发的安装镜像</b></summary>
+
+<br>
 
 ```bash
 ./Scripts/release.sh
 ```
 
-产物是 `dist/Macindows.dmg`：同时支持苹果芯片和 Intel，用 Developer ID 证书签名并经过苹果公证，对方打开后把应用拖进「应用程序」就装好了。需要钥匙串里有 Developer ID Application 证书，并且事先保存过一次公证凭据（之后不用再输）：
+产物是 `dist/Macindows.dmg`：同时支持 Apple 芯片和 Intel，用 Developer ID 证书签名并经过 Apple 公证。需要钥匙串里有你自己的 Developer ID Application 证书，并且事先保存过一次公证凭据：
 
 ```bash
-xcrun notarytool store-credentials "macindows-notary" --apple-id "<苹果账号邮箱>" --team-id <团队编号>
+xcrun notarytool store-credentials "macindows-notary" --apple-id "<Apple 账号邮箱>" --team-id <团队编号>
 ```
 
-没保存凭据时脚本只签名不公证。本机安装的版本仍然用 `install.sh`，两者签名不同，混用会让系统要求重新授权辅助功能。
+没保存凭据时脚本只签名不公证。证书和凭据都只存在于本机钥匙串，仓库里不包含任何签名材料。
 
 镜像打开后的版面（窗口大小、图标位置、背景图）由 `Scripts/make-dmg.sh` 让访达写进镜像，所以打包途中访达会短暂弹出一个窗口，首次运行时系统会询问是否允许控制访达。背景图由 `swift Scripts/make-dmg-background.swift Resources` 生成，改版面时两个脚本里的坐标要一起改。
 
-## 排查
+</details>
+
+## 排查问题
 
 ```bash
-swift test                                         # 点击规则和坐标换算的单元测试
-open -n /Applications/Macindows.app --args --diagnose        # 结果写到 ~/Library/Logs/Macindows/diagnose.txt
-open -n /Applications/Macindows.app --args --selftest        # Macindows 运行时模拟一次悬停（会短暂移动鼠标），结果写到 selftest.txt
+swift test                                              # 点击规则和坐标换算的单元测试
+open -n /Applications/Macindows.app --args --diagnose   # 结果写到 ~/Library/Logs/Macindows/diagnose.txt
+open -n /Applications/Macindows.app --args --selftest   # 模拟一次悬停（会短暂移动鼠标），结果写到 selftest.txt
 build/Macindows.app/Contents/MacOS/Macindows --render-sample /tmp/macindows-sample   # 用假数据渲染悬停窗版面
 ```
 
-运行日志在 `~/Library/Logs/Macindows/macindows.log`。
+运行日志在 `~/Library/Logs/Macindows/macindows.log`。`--diagnose` 的输出会包含当前窗口的标题，同样只保存在本机；提交问题时请先自行检查再决定是否附上。
 
-## 目录
+## 目录结构
 
-- `Sources/MacindowsCore`：点击规则、坐标换算等纯逻辑
-- `Sources/Macindows`：应用本体
-- `preview/`：定稿前用来比较方案的网页原型
+| 路径 | 内容 |
+| --- | --- |
+| `Sources/MacindowsCore` | 点击规则、坐标换算等纯逻辑，带单元测试 |
+| `Sources/Macindows` | 应用本体 |
+| `Scripts` | 构建、安装、打包脚本，以及图标和安装镜像背景的绘制脚本 |
+| `Resources` | 应用图标、`Info.plist`、安装镜像背景 |
+| `preview` | 定稿前用来比较方案的网页原型，仅作留档 |
+
+---
+
+<p align="center"><sub>Macindows 是独立开发的第三方工具，与 Apple 和 Microsoft 均无关联。macOS、Windows 分别是其各自所有者的商标。</sub></p>

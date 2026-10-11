@@ -25,13 +25,15 @@
 ./Scripts/release.sh
 ```
 
-产物是 `dist/Macindows.zip`：同时支持苹果芯片和 Intel，用 Developer ID 证书签名并经过苹果公证，对方解压后双击就能打开。需要钥匙串里有 Developer ID Application 证书，并且事先保存过一次公证凭据（之后不用再输）：
+产物是 `dist/Macindows.dmg`：同时支持苹果芯片和 Intel，用 Developer ID 证书签名并经过苹果公证，对方打开后把应用拖进「应用程序」就装好了。需要钥匙串里有 Developer ID Application 证书，并且事先保存过一次公证凭据（之后不用再输）：
 
 ```bash
 xcrun notarytool store-credentials "macindows-notary" --apple-id "<苹果账号邮箱>" --team-id <团队编号>
 ```
 
 没保存凭据时脚本只签名不公证。本机安装的版本仍然用 `install.sh`，两者签名不同，混用会让系统要求重新授权辅助功能。
+
+镜像打开后的版面（窗口大小、图标位置、背景图）由 `Scripts/make-dmg.sh` 让访达写进镜像，所以打包途中访达会短暂弹出一个窗口，首次运行时系统会询问是否允许控制访达。背景图由 `swift Scripts/make-dmg-background.swift Resources` 生成，改版面时两个脚本里的坐标要一起改。
 
 ## 排查
 

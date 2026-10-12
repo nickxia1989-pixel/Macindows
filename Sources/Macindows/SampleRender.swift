@@ -13,7 +13,7 @@ enum SampleRender {
                 let aspect = aspects[index % aspects.count]
                 // 每三个里留一个没有画面的，检查占位图标
                 let image = images && index % 3 != 2 ? sampleImage(aspect: aspect, hue: CGFloat(index % 6) * 0.07 + 0.5) : nil
-                return PreviewEntry(title: titles[index % titles.count], isCurrent: index == 0, aspect: aspect, thumbnail: image)
+                return PreviewEntry(title: titles[index % titles.count], aspect: aspect, thumbnail: image)
             }
         }
         let icon = NSImage(systemSymbolName: "safari", accessibilityDescription: nil)
@@ -26,8 +26,11 @@ enum SampleRender {
         write({ $0.configure(entries: entries(6, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .aqua, to: directory.appendingPathComponent("thumbnails-6-light.png"))
         write({ $0.configure(entries: entries(18, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("thumbnails-18-compressed.png"))
         writeMenuBarIcon(to: directory)
-        let empty = [PreviewEntry(title: "备忘录", isCurrent: false, aspect: nil, thumbnail: nil, isPlaceholder: true)]
-        write({ $0.configure(entries: empty, thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("empty-thumbnail.png"))
+        // App 在运行但没有窗口：卡片和一张预览一样大，里面是一扇空白的窗口，正中是 App 图标
+        let empty = [PreviewEntry(title: "备忘录", aspect: nil, thumbnail: nil, isPlaceholder: true)]
+        let notes = NSWorkspace.shared.icon(forFile: "/System/Applications/Notes.app")
+        write({ $0.configure(entries: empty, thumbnails: true, placeholder: notes, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("empty-thumbnail-dark.png"))
+        write({ $0.configure(entries: empty, thumbnails: true, placeholder: notes, maxSize: room) }, appearance: .aqua, to: directory.appendingPathComponent("empty-thumbnail-light.png"))
         write({ $0.configure(entries: empty, thumbnails: false, placeholder: nil, maxSize: room) }, appearance: .aqua, to: directory.appendingPathComponent("empty-list-light.png"))
         write({ $0.configure(entries: entries(30, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("thumbnails-30-falls-back-to-list.png"))
         // 屏幕放不下全部窗口时，列表末尾会写「还有 N 个窗口」
@@ -78,7 +81,7 @@ enum SampleRender {
 
     /// `--check-hover`：检查高亮是否跟着鼠标位置走、内容重建后是否还在。返回逐项结果
     static func checkHover() -> [String] {
-        let entries = (0..<4).map { PreviewEntry(title: "窗口 \($0)", isCurrent: $0 == 0, aspect: 1.5, thumbnail: nil) }
+        let entries = (0..<4).map { PreviewEntry(title: "窗口 \($0)", aspect: 1.5, thumbnail: nil) }
         let content = PreviewContentView()
         let size = content.configure(entries: entries, thumbnails: true, placeholder: nil, maxSize: CGSize(width: 2000, height: 1000))
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
@@ -123,7 +126,7 @@ enum SampleRender {
         root.layer?.backgroundColor = (dark ? NSColor(white: 0.32, alpha: 1) : NSColor(white: 0.72, alpha: 1)).cgColor
         let card = NSView(frame: NSRect(x: margin, y: margin, width: size.width, height: size.height))
         card.wantsLayer = true
-        card.layer?.cornerRadius = min(14, size.height / 2)
+        card.layer?.cornerRadius = min(16, size.height / 2)
         card.layer?.backgroundColor = (dark ? NSColor(white: 0.16, alpha: 1) : NSColor(white: 0.96, alpha: 1)).cgColor
         content.frame = card.bounds
         card.addSubview(content)

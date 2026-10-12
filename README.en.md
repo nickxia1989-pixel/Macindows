@@ -41,7 +41,7 @@ Rest the pointer on any app icon in the Dock:
 - **See every window of that app**, whether open, hidden or minimized. Click one to switch to it.
 - **One row, in the order the windows were opened.** The order does not change as you switch. With many windows the previews shrink; with even more, the panel becomes a list of titles.
 - **Thumbnails are optional.** Without Screen Recording permission the panel shows window titles only, and everything else works the same.
-- **Running apps with no windows** get a placeholder card of the same size. Click it to open a new window.
+- **Running apps with no windows** get a card of the same size holding a blank window with the app icon. Click it to open a new window.
 - **Close windows in place** with the close button on each item, or with a middle click.
 - **Hard to trigger by accident.** Passing over other icons on the way to the panel does not switch it away.
 

@@ -289,8 +289,8 @@ final class HoverController {
             shown = .empty(item, app)
             signature = ""
             captureGeneration += 1
-            // 和只有一个窗口时的悬停窗一样大：标题是 App 的名字，画面的位置放 App 图标
-            let entry = PreviewEntry(title: app.localizedName ?? item.title, isCurrent: false, aspect: nil, thumbnail: nil, isPlaceholder: true)
+            // 和只有一个窗口时的悬停窗一样大：标题是 App 的名字，原本放画面的地方是一扇空白的窗口，正中是 App 图标
+            let entry = PreviewEntry(title: app.localizedName ?? item.title, aspect: nil, thumbnail: nil, isPlaceholder: true)
             if let layout = layout(for: item) {
                 place(panel.render(entries: [entry], thumbnails: showsThumbnails, placeholder: app.icon, maxSize: layout.maxSize), layout)
             }
@@ -359,7 +359,6 @@ final class HoverController {
         snapshot.windows.map { window in
             let size = window.element.frame?.size
             return PreviewEntry(title: window.title,
-                                isCurrent: snapshot.isFrontmost && !snapshot.isHidden && window.isMain && !window.isMinimized,
                                 aspect: size.flatMap { $0.height > 1 ? $0.width / $0.height : nil },
                                 thumbnail: window.id.flatMap { thumbnailCache[$0] })
         }
@@ -374,7 +373,7 @@ final class HoverController {
     }
 
     private static func signature(of entries: [PreviewEntry]) -> String {
-        entries.map { "\($0.title)|\($0.isCurrent)" }.joined(separator: "\n")
+        entries.map(\.title).joined(separator: "\n")
     }
 
     private typealias Layout = (edge: DockEdge, itemFrame: CGRect, dockFrame: CGRect, visible: CGRect, maxSize: CGSize, gap: CGFloat)

@@ -3,12 +3,11 @@ import AppKit
 /// 悬停窗里要展示的一个窗口。不区分它是开着、隐藏还是最小化：对「我要切到哪个窗口」来说这不重要。
 struct PreviewEntry {
     let title: String
-    /// 是否就是用户眼下正在用的那个窗口
-    let isCurrent: Bool
     /// 窗口的宽高比；缩略图还没截到时先按它占位，免得图到了以后版面跳动
     let aspect: CGFloat?
     var thumbnail: NSImage?
-    /// 不是真正的窗口，而是「这个 App 还没开窗口，点这里开一个」的占位项（标题是 App 的名字）
+    /// 不是真正的窗口，而是「这个 App 还没开窗口，点这里开一个」的入口（标题是 App 的名字）。
+    /// 它和一张预览一样大，原本放窗口画面的地方是一扇空白的窗口，正中是 App 的图标
     var isPlaceholder = false
 }
 
@@ -21,9 +20,11 @@ final class FirstMouseButton: NSButton {
 final class PreviewItemView: NSView {
     static let rowHeight: CGFloat = 28
     static let titleFont = NSFont.systemFont(ofSize: 13)
-    static let currentFont = NSFont.systemFont(ofSize: 13, weight: .semibold)
     /// 一格里除缩略图之外占掉的宽和高（标题行与四周留白）
     static let cellChrome = CGSize(width: 8, height: 30)
+    /// 鼠标停上来时描在缩略图外面的那一圈的粗细
+    private static let ringWidth: CGFloat = 3
+    private static let thumbRadius: CGFloat = 6
 
     var onSelect: (() -> Void)?
     var onClose: (() -> Void)?
@@ -35,6 +36,12 @@ final class PreviewItemView: NSView {
     private let icon = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let thumbView = NSImageView()
+    /// 垫在缩略图底下的投影。缩略图自己要裁圆角，裁了就画不出投影，所以单独一层
+    private let thumbShadow = NSView()
+    /// 只让投影露出缩略图以外的那一圈：有的缩略图是半透明的，投影垫在底下会把它弄脏
+    private let shadowMask = CAShapeLayer()
+    /// 鼠标停上来时描在缩略图外面的一圈强调色
+    private let ring = NSView()
     private let closeButton = FirstMouseButton()
 
     init(entry: PreviewEntry, thumbBound: CGSize?, placeholder: NSImage?) {
@@ -44,53 +51,63 @@ final class PreviewItemView: NSView {
         wantsLayer = true
 
         highlight.wantsLayer = true
-        highlight.layer?.cornerRadius = thumbBound == nil ? 7 : 10
+        highlight.layer?.cornerRadius = 7
         highlight.layer?.backgroundColor = NSColor.clear.cgColor
         addSubview(highlight)
 
         titleLabel.stringValue = entry.title
-        titleLabel.font = entry.isCurrent ? Self.currentFont : Self.titleFont
+        titleLabel.font = Self.titleFont
         titleLabel.textColor = .labelColor
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.toolTip = entry.title
         addSubview(titleLabel)
 
-        if thumbBound != nil {
+        if let bound = thumbBound {
             thumbView.wantsLayer = true
-            thumbView.layer?.cornerRadius = 6
+            thumbView.layer?.cornerRadius = Self.thumbRadius
             thumbView.layer?.masksToBounds = true
-            thumbView.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
-            thumbView.layer?.borderWidth = entry.isCurrent ? 2 : 0.5
-            thumbView.layer?.borderColor = (entry.isCurrent ? NSColor.controlAccentColor : NSColor.separatorColor).cgColor
+            thumbView.layer?.borderWidth = 0.5
             thumbView.imageAlignment = .alignCenter
+            thumbShadow.wantsLayer = true
+            thumbShadow.layer?.shadowColor = NSColor.black.cgColor
+            thumbShadow.layer?.shadowRadius = 5
+            thumbShadow.layer?.shadowOffset = CGSize(width: 0, height: 2)
+            shadowMask.fillRule = .evenOdd
+            thumbShadow.layer?.mask = shadowMask
+            ring.wantsLayer = true
+            ring.layer?.cornerRadius = Self.thumbRadius + Self.ringWidth
+            ring.layer?.borderWidth = Self.ringWidth
+            ring.isHidden = true
             if let image = entry.thumbnail {
                 thumbView.imageScaling = .scaleAxesIndependently
                 thumbView.image = image
-            } else if let placeholder, let bound = thumbBound {
-                // 还没截到画面（或截不到）时放一个 App 图标占位
+            } else if let placeholder {
+                // 没有画面可放时放一个 App 图标：窗口的画面还没截到（或截不到），或者这个 App 根本没开窗口。
+                // 后一种是一扇空白的窗口，图标大一些；描边和投影都和真正的窗口画面一样
                 thumbView.imageScaling = .scaleProportionallyDown
-                let side = min(48, bound.height * 0.5)
+                let side = min(entry.isPlaceholder ? 64 : 48, bound.height * 0.5)
                 let copy = placeholder.copy() as! NSImage
                 copy.size = NSSize(width: side, height: side)
                 thumbView.image = copy
             }
+            addSubview(thumbShadow)
             addSubview(thumbView)
+            addSubview(ring)
         } else {
             icon.image = NSImage(systemSymbolName: entry.isPlaceholder ? "macwindow.badge.plus" : "macwindow", accessibilityDescription: nil)
-            icon.symbolConfiguration = .init(pointSize: 12, weight: entry.isCurrent ? .semibold : .regular)
-            icon.contentTintColor = entry.isCurrent ? .controlAccentColor : .secondaryLabelColor
+            icon.symbolConfiguration = .init(pointSize: 12, weight: .regular)
             addSubview(icon)
         }
 
         closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: L("关闭窗口"))
         closeButton.symbolConfiguration = .init(pointSize: 9, weight: .bold)
         closeButton.isBordered = false
-        closeButton.contentTintColor = .secondaryLabelColor
         closeButton.toolTip = L("关闭窗口")
         closeButton.target = self
         closeButton.action = #selector(closeClicked)
         closeButton.isHidden = true
         addSubview(closeButton)
+        updateColors()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -102,15 +119,26 @@ final class PreviewItemView: NSView {
         super.layout()
         let width = bounds.width, height = bounds.height
         if let bound = thumbBound {
-            highlight.frame = bounds
             titleLabel.frame = NSRect(x: 6, y: 5, width: max(0, width - 30), height: 17)
             closeButton.frame = NSRect(x: width - 23, y: 4, width: 18, height: 18)
             // 每一格大小相同，缩略图按窗口自己的比例缩进这一格里并居中
             let aspect = entry.thumbnail.map { $0.size.width / max($0.size.height, 1) } ?? entry.aspect ?? (bound.width / bound.height)
             let fitted = min(bound.width / aspect, bound.height)
             let size = CGSize(width: (fitted * aspect).rounded(), height: fitted.rounded())
-            thumbView.frame = NSRect(x: ((width - size.width) / 2).rounded(), y: (26 + (bound.height - size.height) / 2).rounded(),
-                                     width: size.width, height: size.height)
+            let frame = NSRect(x: ((width - size.width) / 2).rounded(), y: (26 + (bound.height - size.height) / 2).rounded(),
+                               width: size.width, height: size.height)
+            thumbView.frame = frame
+            ring.frame = frame.insetBy(dx: -Self.ringWidth, dy: -Self.ringWidth)
+            thumbShadow.frame = frame
+            let shape = CGPath(roundedRect: NSRect(origin: .zero, size: size), cornerWidth: Self.thumbRadius, cornerHeight: Self.thumbRadius, transform: nil)
+            thumbShadow.layer?.shadowPath = shape
+            // 遮罩比缩略图大出一圈，中间挖掉缩略图本身
+            let around = NSRect(origin: .zero, size: size).insetBy(dx: -30, dy: -30)
+            let outside = CGMutablePath()
+            outside.addRect(around)
+            outside.addPath(shape)
+            shadowMask.frame = NSRect(origin: .zero, size: size)
+            shadowMask.path = outside
         } else {
             highlight.frame = bounds.insetBy(dx: 0, dy: 1)
             icon.frame = NSRect(x: 9, y: (height - 16) / 2, width: 16, height: 16)
@@ -142,10 +170,57 @@ final class PreviewItemView: NSView {
     var isHighlighted = false {
         didSet {
             guard isHighlighted != oldValue else { return }
-            highlight.layer?.backgroundColor = (isHighlighted ? NSColor.labelColor.withAlphaComponent(0.1) : .clear).cgColor
             closeButton.isHidden = !isHighlighted || entry.isPlaceholder
+            updateColors()
         }
     }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateColors()
+    }
+
+    /// 各处的颜色，包括鼠标停在这一项上时的样子。颜色按这块视图自己的深浅外观来取，不依赖调用时的全局状态。
+    ///
+    /// 鼠标停上来时——
+    /// 列表行：和系统菜单一样，整行铺上强调色、字变白。
+    /// 缩略图：在窗口画面外面描一圈强调色，和调度中心里指着一个窗口时一样。画面本身不动、不放大：
+    /// 试过让它略微抬起，鼠标一扫过去一排窗口挨个跳一下，看着难受。也试过在整格底下垫一块底色，像网页上的卡片。
+    private func updateColors() {
+        let dark = effectiveAppearance.isDark
+        guard thumbBound != nil else {
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                highlight.layer?.backgroundColor = isHighlighted ? NSColor.controlAccentColor.cgColor : NSColor.clear.cgColor
+            }
+            titleLabel.textColor = isHighlighted ? .white : .labelColor
+            icon.contentTintColor = isHighlighted ? .white : .secondaryLabelColor
+            closeButton.contentTintColor = isHighlighted ? NSColor.white.withAlphaComponent(0.9) : .secondaryLabelColor
+            return
+        }
+        closeButton.contentTintColor = .secondaryLabelColor
+        ring.isHidden = !isHighlighted
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            ring.layer?.borderColor = NSColor.controlAccentColor.cgColor
+            // 窗口画面常常是一片白，板子在浅色外观下也偏白，只靠一条淡淡的细线分不开，所以描边要实一些，再配上投影
+            thumbView.layer?.borderColor = (dark ? NSColor.white.withAlphaComponent(0.22) : NSColor.black.withAlphaComponent(0.26)).cgColor
+            if entry.isPlaceholder {
+                thumbView.layer?.backgroundColor = Self.emptyFill(dark: dark).cgColor
+            } else {
+                thumbView.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
+            }
+        }
+        thumbShadow.layer?.shadowOpacity = dark ? 0.35 : 0.22
+    }
+
+    /// 空白窗口的底色：在玻璃上压一层很淡的暗色，像一块嵌在板子里的空玻璃片。
+    /// 试过用窗口本来的白底，一大块白很刺眼；也试过半透明的白和灰，都不如这样安静（在真实玻璃上并排比过）
+    private static func emptyFill(dark: Bool) -> NSColor {
+        NSColor.black.withAlphaComponent(dark ? 0.22 : 0.06)
+    }
+}
+
+extension NSAppearance {
+    var isDark: Bool { bestMatch(from: [.darkAqua, .aqua]) == .darkAqua }
 }
 
 /// 玻璃边缘的反光。系统的玻璃控件边缘有一圈「上亮下暗」的高光，面上也是上浅下深，看起来有厚度；
@@ -160,9 +235,9 @@ final class GlassRimView: NSView {
         var rim: [CGFloat]
     }
 
-    var darkLook = Look(sheenTop: 0.10, sheenBottom: 0.08, rim: [0.46, 0.16, 0.06, 0.18]) { didSet { needsLayout = true } }
+    var darkLook = Look(sheenTop: 0.05, sheenBottom: 0.04, rim: [0.46, 0.16, 0.06, 0.18]) { didSet { needsLayout = true } }
     // 浅色下面上的提亮必须很淡：稍重一点就像蒙了一层白雾，玻璃后面的颜色透不出来（实测对比过）
-    var lightLook = Look(sheenTop: 0.06, sheenBottom: 0.03, rim: [0.85, 0.4, 0.18, 0.35]) { didSet { needsLayout = true } }
+    var lightLook = Look(sheenTop: 0.03, sheenBottom: 0.02, rim: [0.85, 0.4, 0.18, 0.35]) { didSet { needsLayout = true } }
 
     private let sheen = CAGradientLayer()
     private let sheenMask = CAShapeLayer()
@@ -318,8 +393,7 @@ final class PreviewContentView: NSView {
         // 宽度跟着最长的标题走，但有上下限
         var widest: CGFloat = 0
         for entry in visible {
-            let font = entry.isCurrent ? PreviewItemView.currentFont : PreviewItemView.titleFont
-            widest = max(widest, (entry.title as NSString).size(withAttributes: [.font: font]).width + 62)
+            widest = max(widest, (entry.title as NSString).size(withAttributes: [.font: PreviewItemView.titleFont]).width + 62)
         }
         let rowWidth = min(max(widest.rounded(.up) + 4, 220), min(420, maxSize.width - Self.padding * 2))
         var y = Self.padding
@@ -347,6 +421,12 @@ final class PreviewContentView: NSView {
 final class PreviewPanel: NSPanel {
     /// 玻璃四周留出的透明边，用来画阴影
     static let margin: CGFloat = 28
+    /// 蒙在玻璃上的那层薄色的浓度。用的是系统里最透的那种玻璃；完全不蒙的话，深色外观下背后一亮白字就看不清
+    /// （实测对比过），0.18 是文字在亮、暗两种背景上都还清楚的最小值附近
+    static let darkVeil: CGFloat = 0.18
+    /// 浅色外观下可以略透一点，但不能再少：实测降到 0.04 时，背后一暗（深色壁纸、黑色的终端窗口），黑字就看不清了。
+    /// 白色的窗口缩略图和发白的板子分不开的问题不靠调透来解决（背后也是白的时候调透没有用），靠缩略图自己的描边和投影
+    static let lightVeil: CGFloat = 0.14
 
     let content = PreviewContentView()
     private let glass = NSGlassEffectView()
@@ -358,6 +438,7 @@ final class PreviewPanel: NSPanel {
     init() {
         glass.contentView = content
         super.init(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        configureGlass(style: .clear, darkVeil: Self.darkVeil, lightVeil: Self.lightVeil)
         isFloatingPanel = true
         // 只有需要键盘输入的控件才会让面板成为键盘焦点；点条目和按钮不会抢走当前窗口的焦点
         becomesKeyOnlyIfNeeded = true
@@ -386,6 +467,15 @@ final class PreviewPanel: NSPanel {
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    /// 玻璃的通透程度。clear 是系统提供的更透的一种玻璃；veil 是在它上面再蒙的一层薄色（深色外观蒙黑、浅色外观蒙白），
+    /// 用来保住文字的可读性：0 最透，越大越接近磨砂
+    func configureGlass(style: NSGlassEffectView.Style, darkVeil: CGFloat, lightVeil: CGFloat) {
+        glass.style = style
+        glass.tintColor = NSColor(name: nil) { appearance in
+            appearance.isDark ? NSColor.black.withAlphaComponent(darkVeil) : NSColor.white.withAlphaComponent(lightVeil)
+        }
+    }
 
     func render(entries: [PreviewEntry], thumbnails: Bool, placeholder: NSImage?, maxSize: CGSize) -> NSSize {
         apply(content.configure(entries: entries, thumbnails: thumbnails, placeholder: placeholder, maxSize: maxSize), cornerRadius: 16)

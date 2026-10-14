@@ -43,7 +43,7 @@ Rest the pointer on any app icon in the Dock:
 - **Thumbnails are optional.** Without Screen Recording permission the panel shows window titles only, and everything else works the same.
 - **Pause to see the whole window.** Rest the pointer on a thumbnail and that window is shown at its real position, without actually switching to it. You can turn this off in the menu.
 - **The same material as the Dock.** The panel uses the Dock's own kind of glass and sits right against it, with no name label wedged in between.
-- **Running apps with no windows** get a card of the same size holding a blank window with the app icon. Click it to open a new window.
+- **Running apps with no windows** get a card of the same size. Click it to open a window. The card shows the window that clicking will bring up, as if it were still open: for apps that only hide their window when you close it (Lark, Notes and others), that window as it last looked; for apps that open a fresh window every time (browsers, terminals and others), the fresh window they opened last time; otherwise a blank window with the app icon.
 - **Close windows in place** with the close button on each item, or with a middle click.
 - **Hard to trigger by accident.** Passing over other icons on the way to the panel does not switch it away.
 
@@ -85,7 +85,7 @@ The installer is signed with a Developer ID and notarized by Apple, so macOS ope
 | Permission | Required | What it is used for |
 | --- | --- | --- |
 | Accessibility | Yes | Knowing which Dock icon the pointer is on; listing, switching, minimizing and closing windows; recognizing clicks on Dock icons |
-| Screen Recording (listed as Screen & System Audio Recording in System Settings) | Optional | Window thumbnails and the in-place preview; also capturing the small patch of screen behind the Dock's name label, to cover the label |
+| Screen Recording (listed as Screen & System Audio Recording in System Settings) | Optional | Window thumbnails, the in-place preview and the picture on the card for apps with no windows; also capturing the small patch of screen behind the Dock's name label, to cover the label |
 
 These permissions are broad, so here is exactly what Macindows does with them:
 

@@ -107,6 +107,30 @@ final class WindowFilterTests: XCTestCase {
     }
 }
 
+final class KeptWindowTests: XCTestCase {
+    private func kept(onScreen: Bool = false, layer: Int = 0, size: CGSize = CGSize(width: 1297, height: 887), title: Bool = true, spaces: [Int] = [1]) -> Bool {
+        isKeptWindow(layer: layer, isOnScreen: onScreen, alpha: 1, size: size, hasTitle: title, windowSpaces: spaces, knownSpaces: [1, 852])
+    }
+
+    func testAClosedMainWindowThatIsStillAroundCounts() {
+        XCTAssertTrue(kept())
+    }
+
+    func testOtherWindowsDoNot() {
+        // 开着的窗口不算「关掉的」
+        XCTAssertFalse(kept(onScreen: true))
+        // 从没显示过的隐形窗口：不在任何桌面上
+        XCTAssertFalse(kept(size: CGSize(width: 500, height: 500), title: false, spaces: []))
+        XCTAssertFalse(kept(spaces: []))
+        // 没有标题的、和菜单栏一样扁的、浮在上面的
+        XCTAssertFalse(kept(title: false))
+        XCTAssertFalse(kept(size: CGSize(width: 2560, height: 30)))
+        XCTAssertFalse(kept(layer: 3))
+        // 挂在一个已经不存在的桌面上
+        XCTAssertFalse(kept(spaces: [99]))
+    }
+}
+
 final class SpaceTests: XCTestCase {
     func testOnlyWindowsOnAnotherExistingSpaceCount() {
         let active: Set<Int> = [1, 852], known: Set<Int> = [1, 7, 852]

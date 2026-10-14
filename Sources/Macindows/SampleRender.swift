@@ -4,8 +4,9 @@ import AppKit
 /// 只用于检查排版；玻璃材质是合成器效果，离屏渲染里看不到，这里用纯色底代替。
 /// 要看真玻璃用 `--show-sample`。
 enum SampleRender {
-    /// `Macindows --show-sample [dark|light] [窗口数] [秒数] [list]`：把真正的悬停窗用假数据摆在主屏幕的程序坞上方几秒钟。
-    /// 不需要任何权限，用来实拍、和程序坞并排比较玻璃的质感。窗口数为 0 时显示「没有窗口」的那张卡片。
+    /// `Macindows --show-sample [dark|light] [窗口数] [秒数] [list|preview]`：把真正的悬停窗用假数据摆在主屏幕的程序坞上方几秒钟。
+    /// 不需要任何权限，用来实拍、和程序坞并排比较玻璃的质感。窗口数为 0 时显示「没有窗口」的那张卡片，
+    /// 再加 preview 时，卡片里放的是点了以后会出来的那扇窗口的画面。
     static func show(arguments: [String]) {
         let dark = arguments.first != "light"
         let count = arguments.dropFirst().first.flatMap(Int.init) ?? 3
@@ -17,13 +18,19 @@ enum SampleRender {
         let visible = screen.visibleFrame
         let room = CGSize(width: visible.width - 24, height: visible.height - 24)
         let icon = NSWorkspace.shared.icon(forFile: "/System/Applications/Notes.app")
-        let entries = count == 0 ? [PreviewEntry(title: "备忘录", aspect: nil, thumbnail: nil, isPlaceholder: true)] : sampleEntries(count, images: true)
+        let entries = count == 0 ? [emptySample(withPreview: arguments.contains("preview"))] : sampleEntries(count, images: true)
         let size = panel.render(entries: entries, thumbnails: thumbnails, placeholder: icon, maxSize: room)
         panel.setCardOrigin(NSPoint(x: (visible.midX - size.width / 2).rounded(), y: visible.minY + 4))
         panel.orderFrontRegardless()
         panel.playEntrance(from: .bottom, duration: 0.175)
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { exit(0) }
         NSApplication.shared.run()
+    }
+
+    /// 「没有窗口」的卡片：空白的，或者放着点了以后会出来的那扇窗口的画面
+    private static func emptySample(withPreview: Bool) -> PreviewEntry {
+        withPreview ? PreviewEntry(title: "全部笔记", aspect: nil, thumbnail: sampleImage(aspect: 1.45, hue: 0.12), isPlaceholder: true)
+                    : PreviewEntry(title: "备忘录", aspect: nil, thumbnail: nil, isPlaceholder: true)
     }
 
     private static let sampleTitles = ["traveler/horizon", "AXUIElement | Apple Developer Documentation", "Swift.org", "维基百科", "Hacker News", "设计笔记"]
@@ -58,6 +65,8 @@ enum SampleRender {
         write({ $0.configure(entries: empty, thumbnails: true, placeholder: notes, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("empty-thumbnail-dark.png"))
         write({ $0.configure(entries: empty, thumbnails: true, placeholder: notes, maxSize: room) }, appearance: .aqua, to: directory.appendingPathComponent("empty-thumbnail-light.png"))
         write({ $0.configure(entries: empty, thumbnails: false, placeholder: nil, maxSize: room) }, appearance: .aqua, to: directory.appendingPathComponent("empty-list-light.png"))
+        // 没有窗口、但知道点了以后会出来的那扇窗口长什么样
+        write({ $0.configure(entries: [emptySample(withPreview: true)], thumbnails: true, placeholder: notes, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("empty-preview-dark.png"))
         write({ $0.configure(entries: entries(30, images: true), thumbnails: true, placeholder: icon, maxSize: room) }, appearance: .darkAqua, to: directory.appendingPathComponent("thumbnails-30-falls-back-to-list.png"))
         // 屏幕放不下全部窗口时，列表末尾会写「还有 N 个窗口」
         write({ $0.configure(entries: entries(30, images: false), thumbnails: false, placeholder: nil, maxSize: CGSize(width: 2536, height: 420)) }, appearance: .darkAqua, to: directory.appendingPathComponent("list-overflow.png"))

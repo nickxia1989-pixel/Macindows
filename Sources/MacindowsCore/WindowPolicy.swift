@@ -113,3 +113,17 @@ public func duplicateTabIndices(frames: [CGRect?]) -> Set<Int> {
     }
     return duplicates
 }
+
+// MARK: 关掉了、但 App 还留着的窗口
+
+/// 窗口服务器里的一扇不在屏幕上的窗口，是不是 App 关窗口时留下、打算再拿出来用的那种。
+///
+/// 很多 App（飞书、备忘录、活动监视器、ChatGPT 等）关窗口时只是把它藏起来，窗口本身连同最后的画面都还在，
+/// 再点程序坞的图标，回来的就是这一扇。它们还挂在原来的桌面上、带着标题。
+/// App 自己用的隐形窗口则从没显示过：不在任何桌面上，多半也没有标题，或者小得不像一扇窗口。
+public func isKeptWindow(layer: Int, isOnScreen: Bool, alpha: Double, size: CGSize, hasTitle: Bool,
+                         windowSpaces: [Int], knownSpaces: Set<Int>) -> Bool {
+    guard layer == 0, !isOnScreen, alpha > 0.01, hasTitle else { return false }
+    guard size.width >= minimumListableWindowSize.width, size.height >= minimumListableWindowSize.height else { return false }
+    return !knownSpaces.isDisjoint(with: windowSpaces)
+}

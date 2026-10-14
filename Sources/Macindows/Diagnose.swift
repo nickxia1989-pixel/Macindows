@@ -49,6 +49,7 @@ enum Diagnose {
                     continue
                 }
                 line += " 运行中 最前=\(snapshot.isFrontmost) 隐藏=\(snapshot.isHidden) 窗口=\(snapshot.windows.count) 点击→\(dockClickAction(for: snapshot.state))"
+                if snapshot.windows.isEmpty, Thumbnailer.isAuthorized { line += " 关掉但留着的窗口=\(WindowIndex.keptWindows(of: app).count)" }
                 add(line)
                 for window in snapshot.windows {
                     add("      · \(window.title.prefix(24)) 窗口号=\(window.id.map(String.init) ?? "无") 最小化=\(window.isMinimized) 主窗口=\(window.isMain)\(window.isOnCurrentSpace ? "" : " 在别的桌面")")

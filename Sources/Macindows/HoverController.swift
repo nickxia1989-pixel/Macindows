@@ -86,6 +86,15 @@ final class HoverController {
     private var peekTimer: Timer?
     private var peekEndTimer: Timer?
     private var settleTimer: Timer?
+    /// 各个 App 上一次「重新打开」时新开出来的那扇窗口的画面和标题，键是 App 的标识。只存在内存里
+    private var learnedPreviews: [String: (image: NSImage, title: String)] = [:]
+    /// 卡片上放过留着的窗口、点了之后回来的却不是它的 App：以后不再拿留着的窗口当预览
+    private var keptMisleads: Set<String> = []
+    /// 卡片上此刻放着的那扇留着的窗口，键是 App 的标识
+    private var shownKept: [String: CGWindowID] = [:]
+    /// 正在等一个没有窗口的 App 把窗口开出来（见 noteReopen）
+    private var reopenWatch: (app: NSRunningApplication, key: String, kept: Set<CGWindowID>, shown: CGWindowID?, deadline: TimeInterval)?
+    private var reopenTimer: Timer?
 
     private let showDelay: TimeInterval = 0.25
     private let fadeInDuration: TimeInterval = 0.175
@@ -390,15 +399,13 @@ final class HoverController {
             return
         }
         if snapshot.windows.isEmpty {
-            if case .empty(let current, _)? = shown, current.isSame(as: item) {} else {
-                log("show empty card of \(item.title)")
-            }
             shown = .empty(item, app)
             signature = ""
             captureGeneration += 1
             endPeek()
-            // 和只有一个窗口时的悬停窗一样大：标题是 App 的名字，原本放画面的地方是一扇空白的窗口，正中是 App 图标
-            let entry = PreviewEntry(title: app.localizedName ?? item.title, aspect: nil, thumbnail: nil, isPlaceholder: true)
+            // 和只有一个窗口时的悬停窗一样大，原本放画面的地方是点了以后会出来的那扇窗口
+            let (entry, kind) = emptyEntry(for: item, app: app)
+            log("show empty card of \(item.title): \(kind)")
             if let layout = layout(for: item) {
                 place(panel.render(entries: [entry], thumbnails: showsThumbnails, placeholder: app.icon, maxSize: layout.maxSize), layout)
             }
@@ -681,6 +688,85 @@ final class HoverController {
         peek.dismiss()
     }
 
+    // MARK: 没有窗口的 App
+
+    private static func key(of app: NSRunningApplication) -> String {
+        app.bundleIdentifier ?? app.bundleURL?.path ?? "pid \(app.processIdentifier)"
+    }
+
+    /// 「没有窗口」的那张卡片。开着缩略图时，放上点了以后会出来的那扇窗口，看上去就像它还开着一样：
+    /// App 关窗口时只是把它藏起来的，用那扇窗口最后的样子；App 每次都开新的，用它上一次新开的那扇；都不知道时是一扇空白的窗口。
+    /// 这里不做原位预览：窗口此刻并不在屏幕上。第二个返回值只用于日志。
+    private func emptyEntry(for item: DockItem, app: NSRunningApplication) -> (PreviewEntry, String) {
+        let name = app.localizedName ?? item.title
+        guard showsThumbnails else { return (PreviewEntry(title: name, aspect: nil, thumbnail: nil, isPlaceholder: true), "blank") }
+        let key = Self.key(of: app)
+        // 窗口服务器一直留着这类窗口最后的画面，直接要
+        if !keptMisleads.contains(key), let kept = WindowIndex.keptWindows(of: app).first, let image = PrivateAPI.captureWindow(kept.id) {
+            shownKept[key] = kept.id
+            let picture = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+            return (PreviewEntry(title: kept.title, aspect: nil, thumbnail: picture, isPlaceholder: true), "kept window")
+        }
+        shownKept[key] = nil
+        if let learned = learnedPreviews[key] {
+            return (PreviewEntry(title: learned.title, aspect: nil, thumbnail: learned.image, isPlaceholder: true), "learned new window")
+        }
+        return (PreviewEntry(title: name, aspect: nil, thumbnail: nil, isPlaceholder: true), "blank")
+    }
+
+    /// 用户让一个没有窗口的 App 开窗口了（点了它在程序坞里的图标，或者点了那张卡片）。看接下来出来的是哪扇窗口：
+    /// 是卡片上那扇留着的窗口，说明预览没错；是一扇新开的，就等它画好了截下来，下次悬停这个 App 时用。
+    /// 留着的窗口点了却没回来，以后这个 App 就不再拿留着的窗口当预览。
+    /// 点图标时这里在鼠标按下的那一刻就被调用，程序坞要等松开才去叫 App，所以记下的「留着的窗口」还没被拿出来。
+    func noteReopen(of app: NSRunningApplication) {
+        guard showsThumbnails else { return }
+        let key = Self.key(of: app)
+        reopenTimer?.invalidate()
+        reopenWatch = (app, key, Set(WindowIndex.keptWindows(of: app).map(\.id)), shownKept[key], ProcessInfo.processInfo.systemUptime + 3)
+        let poll = Timer(timeInterval: 0.15, repeats: true) { [weak self] _ in self?.checkReopen() }
+        RunLoop.main.add(poll, forMode: .common)
+        reopenTimer = poll
+    }
+
+    private func checkReopen() {
+        guard let watch = reopenWatch, !watch.app.isTerminated, ProcessInfo.processInfo.systemUptime < watch.deadline else {
+            endReopenWatch()
+            return
+        }
+        guard let window = WindowIndex.snapshot(of: watch.app)?.windows.first(where: { $0.isOnCurrentSpace && !$0.isMinimized }), let id = window.id else { return }
+        endReopenWatch()
+        let name = watch.app.localizedName ?? "?"
+        if id == watch.shown { return }
+        // 留着的窗口里有一扇回来了（卡片上放的不是它，或者用户没等卡片出来就点了）：这个 App 不是每次新开的那种，没什么可学
+        if watch.kept.contains(id) {
+            if watch.shown != nil { mislead(watch.key, name) }
+            return
+        }
+        // 开出来的是一扇新的：留着的那些窗口点了不会回来，拿它们当预览只会误导
+        if !watch.kept.isEmpty { mislead(watch.key, name) }
+        // 新开的窗口：等它弹出来、画好首屏再截，赶在用户开始用它之前
+        let key = watch.key, title = window.title
+        _ = timer(0.6) { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let image = await Thumbnailer.capture(windowIDs: [id])[id], let self else { return }
+                if self.learnedPreviews.count > 40 { self.learnedPreviews.removeAll() }
+                self.learnedPreviews[key] = (image, title)
+                log("learned how a new window of \(name) looks")
+            }
+        }
+    }
+
+    private func mislead(_ key: String, _ name: String) {
+        guard keptMisleads.insert(key).inserted else { return }
+        log("kept window of \(name) did not come back, using new-window previews for it from now on")
+    }
+
+    private func endReopenWatch() {
+        reopenTimer?.invalidate()
+        reopenTimer = nil
+        reopenWatch = nil
+    }
+
     // MARK: 操作
 
     private func select(_ index: Int) {
@@ -708,6 +794,7 @@ final class HoverController {
     /// 让一个没有窗口的 App 开一个窗口。直接请程序坞执行它自己的「点击图标」动作，效果和用户亲手点一下完全一样。
     private func openWindow() {
         guard case .empty(let item, let app)? = shown else { return }
+        noteReopen(of: app)
         hide()
         DispatchQueue.global(qos: .userInteractive).async {
             let pressed = item.element.perform(kAXPressAction)

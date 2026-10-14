@@ -90,7 +90,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         log("dock click \(item.title): windows=\(snapshot.windows.count) front=\(snapshot.isFrontmost) hidden=\(snapshot.isHidden) -> \(action)")
         switch action {
         case .passThrough:
-            DispatchQueue.main.async { [weak self] in self?.hover.dismissAfterClick() }
+            let reopening = snapshot.windows.isEmpty
+            DispatchQueue.main.async { [weak self] in
+                // 没有窗口的 App 被点了：程序坞会请它开一扇窗口，看看开出来的是什么样
+                if reopening { self?.hover.noteReopen(of: app) }
+                self?.hover.dismissAfterClick()
+            }
             return .passThrough
         case .minimizeWindow:
             guard let window = snapshot.windows.first else { return .passThrough }

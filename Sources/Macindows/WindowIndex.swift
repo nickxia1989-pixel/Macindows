@@ -112,6 +112,22 @@ enum WindowIndex {
         return found.enumerated().filter { !duplicates.contains($0.offset) }.map(\.element.window)
     }
 
+    /// App 关窗口时留下的窗口（见 isKeptWindow），排在最前的在前面。要读窗口标题，所以需要「屏幕录制」权限。
+    static func keptWindows(of app: NSRunningApplication) -> [(id: CGWindowID, title: String)] {
+        guard let layout = PrivateAPI.spaceLayout() else { return [] }
+        let pid = app.processIdentifier
+        let all = CGWindowListCopyWindowInfo([.excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        return all.compactMap { info in
+            guard (info[kCGWindowOwnerPID as String] as? pid_t) == pid, let number = info[kCGWindowNumber as String] as? Int,
+                  let bounds = (info[kCGWindowBounds as String] as? [String: Any]).flatMap({ CGRect(dictionaryRepresentation: $0 as CFDictionary) }) else { return nil }
+            let id = CGWindowID(number), title = info[kCGWindowName as String] as? String ?? ""
+            guard isKeptWindow(layer: info[kCGWindowLayer as String] as? Int ?? -1, isOnScreen: info[kCGWindowIsOnscreen as String] as? Bool ?? false,
+                               alpha: info[kCGWindowAlpha as String] as? Double ?? 1, size: bounds.size, hasTitle: !title.isEmpty,
+                               windowSpaces: PrivateAPI.spaces(of: id), knownSpaces: layout.all) else { return nil }
+            return (id, title)
+        }
+    }
+
     /// 切到指定窗口：先把它弄回屏幕上（取消隐藏、取消最小化），再提到最前。窗口在别的桌面上时，系统会跟着切过去。
     /// 要在后台线程调用：窗口正在播放「从程序坞放回来」的动画时，目标 App 要等动画播完才答复，
     /// 「提到最前」这一步会被卡住几百毫秒；放在主线程上的话，这期间悬停窗关不掉，鼠标也没人理。

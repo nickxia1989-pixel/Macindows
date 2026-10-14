@@ -7,8 +7,9 @@ struct PreviewEntry {
     /// 窗口的宽高比；缩略图还没截到时先按它占位，免得图到了以后版面跳动
     let aspect: CGFloat?
     var thumbnail: NSImage?
-    /// 不是真正的窗口，而是「这个 App 还没开窗口，点这里开一个」的入口（标题是 App 的名字）。
-    /// 它和一张预览一样大，原本放窗口画面的地方是一扇空白的窗口，正中是 App 的图标
+    /// 不是真正的窗口，而是「这个 App 还没开窗口，点这里开一个」的入口。它和一张预览一样大。
+    /// 知道点了以后会出来的那扇窗口长什么样时，thumbnail 就是它的画面，看上去和一扇开着的窗口一样；
+    /// 不知道时是一扇空白的窗口，正中是 App 的图标，标题是 App 的名字
     var isPlaceholder = false
 }
 
@@ -234,7 +235,7 @@ final class PreviewItemView: NSView {
             ring.layer?.borderColor = NSColor.controlAccentColor.cgColor
             // 窗口画面常常是一片白，板子在浅色外观下也偏白，只靠一条淡淡的细线分不开，所以描边要实一些，再配上投影
             thumbView.layer?.borderColor = (dark ? NSColor.white.withAlphaComponent(0.22) : NSColor.black.withAlphaComponent(0.26)).cgColor
-            if entry.isPlaceholder {
+            if entry.isPlaceholder, entry.thumbnail == nil {
                 thumbView.layer?.backgroundColor = Self.emptyFill(dark: dark).cgColor
             } else {
                 // 画面还没截到的窗口：一扇不透明的空窗口。不能透——悬停窗贴着程序坞时，底下压着程序坞的名称气泡

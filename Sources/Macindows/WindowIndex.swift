@@ -13,6 +13,11 @@ struct AppWindow {
     let frame: CGRect?
     /// 是不是在当前桌面上。在别的桌面上（包括各自全屏的窗口）时为 false
     let isOnCurrentSpace: Bool
+
+    /// 同一扇窗口，换个最小化状态
+    func with(minimized: Bool) -> AppWindow {
+        AppWindow(element: element, id: id, title: title, isMinimized: minimized, isMain: isMain, frame: frame, isOnCurrentSpace: isOnCurrentSpace)
+    }
 }
 
 /// 某一时刻某个 App 的窗口情况
@@ -42,9 +47,10 @@ enum WindowIndex {
         let asked = ProcessInfo.processInfo.systemUptime
         let answer = element.copy(kAXWindowsAttribute)
         guard let raw = answer.value as? [AnyObject] else {
-            if answer.error == .cannotComplete, ProcessInfo.processInfo.systemUptime - asked >= AXHealth.slowThreshold { AXHealth.backOff(pid) }
+            if answer.error == .cannotComplete, ProcessInfo.processInfo.systemUptime - asked >= AXHealth.slowThreshold { AXHealth.noteSilence(pid) }
             return nil
         }
+        AXHealth.noteAnswer(pid)
 
         let layout = PrivateAPI.spaceLayout()
         var windows = raw.filter { CFGetTypeID($0) == AXUIElementGetTypeID() }.compactMap { makeWindow($0 as! AXUIElement, of: app, layout: layout) }
@@ -128,8 +134,17 @@ enum WindowIndex {
         }
     }
 
+    /// 对窗口的操作（切过去、最小化、关掉）都放到这条队列上，一个接一个地执行，不占主线程（原因见 focus）。
+    /// 必须排队：用户连着点图标时，「最小化」还卡在动画里，后面的「放回来」要是抢先执行了，窗口就会停在相反的状态
+    static let actions = DispatchQueue(label: "macindows.window-actions", qos: .userInteractive)
+
+    /// 也要放到 actions 上执行：窗口播放最小化动画期间，这一步可能迟迟不返回
+    static func minimize(_ window: AppWindow) {
+        window.element.set(kAXMinimizedAttribute, kCFBooleanTrue)
+    }
+
     /// 切到指定窗口：先把它弄回屏幕上（取消隐藏、取消最小化），再提到最前。窗口在别的桌面上时，系统会跟着切过去。
-    /// 要在后台线程调用：窗口正在播放「从程序坞放回来」的动画时，目标 App 要等动画播完才答复，
+    /// 要放到 actions 上执行：窗口正在播放「从程序坞放回来」的动画时，目标 App 要等动画播完才答复，
     /// 「提到最前」这一步会被卡住几百毫秒；放在主线程上的话，这期间悬停窗关不掉，鼠标也没人理。
     static func focus(_ window: AppWindow, of app: NSRunningApplication) {
         if app.isHidden { app.unhide() }
@@ -151,7 +166,7 @@ enum WindowIndex {
         log("focus \(app.localizedName ?? "?") window=\(window.id.map(String.init) ?? "-") precise=\(precise) currentSpace=\(window.isOnCurrentSpace)")
     }
 
-    /// 同样要在后台线程调用：App 弹出「是否保存」之类的对话框时，这一步也可能迟迟不返回
+    /// 同样要放到 actions 上执行：App 弹出「是否保存」之类的对话框时，这一步也可能迟迟不返回
     static func close(_ window: AppWindow) {
         if let button = window.element.element(kAXCloseButtonAttribute) {
             button.perform(kAXPressAction)

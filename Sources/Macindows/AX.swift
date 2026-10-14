@@ -79,13 +79,20 @@ enum Accessibility {
 /// 主屏幕（坐标原点所在的那块）的高度，用于两套坐标系互换
 var primaryScreenHeight: CGFloat { NSScreen.screens.first?.frame.height ?? 0 }
 
-/// 记住哪些 App 刚刚没应答。卡住的 App 每问一次都要等到超时，短时间内不再去问它。
+/// 记住哪些 App 不应答。卡住的 App 每问一次都要等到超时，短时间内不再去问它。
+///
+/// App 正在开窗口、窗口正在播放最小化之类的动画时，也会有零点几秒顾不上答话，这不算卡住：
+/// 要从第一次没答起、隔了一秒多还是不答，才暂时不理它；中间答上过一次就重新算。
 enum AXHealth {
     private static let lock = NSLock()
+    /// 各个 App 从什么时候起一直没答话
+    private static var silentSince: [pid_t: TimeInterval] = [:]
     private static var silencedUntil: [pid_t: TimeInterval] = [:]
-    /// 一次问话等了这么久还没应答，就当它卡住了
+    /// 一次问话等了这么久还没应答，就记一次没答
     static let slowThreshold: TimeInterval = 0.25
-    private static let backoff: TimeInterval = 5
+    /// 一直不答多久才算卡住
+    private static let patience: TimeInterval = 1
+    private static let backoff: TimeInterval = 3
 
     static func isBackedOff(_ pid: pid_t) -> Bool {
         lock.lock()
@@ -96,10 +103,25 @@ enum AXHealth {
         return false
     }
 
-    static func backOff(_ pid: pid_t) {
+    /// 问了没答
+    static func noteSilence(_ pid: pid_t) {
+        let now = ProcessInfo.processInfo.systemUptime
         lock.lock()
-        silencedUntil[pid] = ProcessInfo.processInfo.systemUptime + backoff
+        let since = silentSince[pid] ?? now
+        silentSince[pid] = since
+        let stuck = now - since >= patience
+        if stuck {
+            silencedUntil[pid] = now + backoff
+            silentSince[pid] = nil
+        }
         lock.unlock()
-        log("app \(pid) is not answering, leaving it alone for \(Int(backoff))s")
+        log(stuck ? "app \(pid) is not answering, leaving it alone for \(Int(backoff))s" : "app \(pid) is slow to answer")
+    }
+
+    /// 问了，答上了
+    static func noteAnswer(_ pid: pid_t) {
+        lock.lock()
+        silentSince[pid] = nil
+        lock.unlock()
     }
 }

@@ -698,9 +698,9 @@ final class HoverController {
         }
         guard case .windows(_, let app, let snapshot)? = shown, snapshot.windows.indices.contains(index) else { return }
         let window = snapshot.windows[index]
-        // 先收起悬停窗，再去切窗口；切窗口放到后台线程，这样悬停窗一点就消失，不用等窗口的动画
+        // 先收起悬停窗，再去切窗口；切窗口不在主线程上做，这样悬停窗一点就消失，不用等窗口的动画
         hide()
-        DispatchQueue.global(qos: .userInteractive).async { WindowIndex.focus(window, of: app) }
+        WindowIndex.actions.async { WindowIndex.focus(window, of: app) }
     }
 
     private func close(_ index: Int) {
@@ -708,7 +708,7 @@ final class HoverController {
         let window = snapshot.windows[index]
         log("close window \(window.id.map(String.init) ?? "-") of \(app.localizedName ?? "?")")
         endPeek()
-        DispatchQueue.global(qos: .userInteractive).async { WindowIndex.close(window) }
+        WindowIndex.actions.async { WindowIndex.close(window) }
         _ = timer(0.3) { [weak self] in self?.refresh() }
     }
 

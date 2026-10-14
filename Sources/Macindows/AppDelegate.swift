@@ -14,6 +14,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let defaults = UserDefaults.standard
     /// 「启用」开关的一份副本，给点击监听的线程读
     private let enabled = OSAllocatedUnfairLock(initialState: true)
+    /// 上一次点图标时替用户做的最小化或放回来（见 decide）。点击监听的线程和执行操作的队列都会碰它，所以加锁
+    private let toggleLock = NSLock()
+    private var lastToggle: Toggle?
+
+    private struct Toggle {
+        let pid: pid_t
+        let window: AppWindow
+        let minimized: Bool
+        /// 到这个时刻之前，再点这个 App 就直接反过来做
+        var until: TimeInterval
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.prepare()
@@ -79,10 +90,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 直接向程序坞和目标 App 问话。要动悬停窗的都丢回主线程。
     private func decide(clickAt point: CGPoint) -> ClickInterceptor.Decision {
         // 不在程序坞范围里的点击到此为止，不向任何进程问话
-        guard enabled.withLock({ $0 }), hover.dock.contains(point) else { return .passThrough }
+        guard enabled.withLock({ $0 }), hover.dock.contains(point) else {
+            forgetToggle()
+            return .passThrough
+        }
         // 点的是哪个图标以程序坞自己说的为准；它的说法偶尔慢半拍，所以再核对一下位置
-        guard let item = hover.dock.hoveredItem(), item.isApplication, hover.dock.isPoint(point, over: item) else { return .passThrough }
-        guard let app = item.runningApp, let snapshot = WindowIndex.snapshot(of: app) else {
+        guard let item = hover.dock.hoveredItem(), item.isApplication, hover.dock.isPoint(point, over: item), let app = item.runningApp else {
+            forgetToggle()
+            return .passThrough
+        }
+        // 刚替这个 App 最小化或者放回过它的窗口，用户又点了：是想反过来。窗口这时多半还在播放动画，
+        // App 要么顾不上答话，要么报的还是动画开始前的样子，问它只会做错，所以直接照着上一次反过来做
+        if let toggle = recentToggle(of: app.processIdentifier) {
+            log("dock click \(item.title): right after \(toggle.minimized ? "minimizing" : "restoring") it -> \(toggle.minimized ? "restoreWindow" : "minimizeWindow")")
+            return toggle.minimized ? restore(toggle.window, of: app) : minimize(toggle.window, of: app)
+        }
+        forgetToggle()
+        guard let snapshot = WindowIndex.snapshot(of: app) else {
+            log("dock click \(item.title): no answer -> passThrough")
             DispatchQueue.main.async { [weak self] in self?.hover.dismissAfterClick() }
             return .passThrough
         }
@@ -99,20 +124,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return .passThrough
         case .minimizeWindow:
             guard let window = snapshot.windows.first else { return .passThrough }
-            return .intercept { [weak self] in
-                self?.hover.dismissAfterClick()
-                // 放到后台线程：窗口播放最小化动画期间，这一步可能迟迟不返回
-                DispatchQueue.global(qos: .userInteractive).async { window.element.set(kAXMinimizedAttribute, kCFBooleanTrue) }
-            }
+            return minimize(window, of: app)
         case .restoreWindow:
             guard let window = snapshot.windows.first else { return .passThrough }
-            return .intercept { [weak self] in
-                self?.hover.dismissAfterClick()
-                DispatchQueue.global(qos: .userInteractive).async { WindowIndex.focus(window, of: app) }
-            }
+            return restore(window, of: app)
         case .showWindowList:
             return .intercept { [weak self] in self?.hover.showPinned(for: item, app: app) }
         }
+    }
+
+    private func minimize(_ window: AppWindow, of app: NSRunningApplication) -> ClickInterceptor.Decision {
+        .intercept { [weak self] in
+            // 鼠标松开、真的要做了才记下（按住不放时这次点击会还给程序坞，什么也不做）
+            self?.remember(window, of: app, minimized: true)
+            self?.hover.dismissAfterClick()
+            WindowIndex.actions.async {
+                WindowIndex.minimize(window)
+                self?.toggleDone(of: app.processIdentifier)
+            }
+        }
+    }
+
+    private func restore(_ window: AppWindow, of app: NSRunningApplication) -> ClickInterceptor.Decision {
+        .intercept { [weak self] in
+            // 鼠标松开、真的要做了才记下（按住不放时这次点击会还给程序坞，什么也不做）
+            self?.remember(window, of: app, minimized: false)
+            self?.hover.dismissAfterClick()
+            WindowIndex.actions.async {
+                WindowIndex.focus(window.with(minimized: true), of: app)
+                self?.toggleDone(of: app.processIdentifier)
+            }
+        }
+    }
+
+    /// 最小化和放回来的动画都在半秒上下。从这次点击起 1.2 秒内、或者操作做完后 0.8 秒内再点，都算紧接着点的
+    private func remember(_ window: AppWindow, of app: NSRunningApplication, minimized: Bool) {
+        let toggle = Toggle(pid: app.processIdentifier, window: window, minimized: minimized, until: ProcessInfo.processInfo.systemUptime + 1.2)
+        toggleLock.withLock { lastToggle = toggle }
+    }
+
+    private func toggleDone(of pid: pid_t) {
+        let until = ProcessInfo.processInfo.systemUptime + 0.8
+        toggleLock.withLock {
+            guard var toggle = lastToggle, toggle.pid == pid else { return }
+            toggle.until = max(toggle.until, until)
+            lastToggle = toggle
+        }
+    }
+
+    private func recentToggle(of pid: pid_t) -> Toggle? {
+        toggleLock.withLock {
+            guard let toggle = lastToggle, toggle.pid == pid, toggle.until > ProcessInfo.processInfo.systemUptime else { return nil }
+            return toggle
+        }
+    }
+
+    /// 点了别处，上一次的就不再算数
+    private func forgetToggle() {
+        toggleLock.withLock { lastToggle = nil }
     }
 
     // MARK: 菜单栏

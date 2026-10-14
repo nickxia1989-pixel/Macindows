@@ -25,7 +25,8 @@ enum Thumbnailer {
 
     /// 截取一批窗口。先用公开的截屏接口；它对已最小化的窗口会失败（实测报「无法开始流播放」），
     /// 这些再直接向窗口服务器要画面——窗口服务器一直留着最小化窗口的画面。两种办法都拿不到的不会出现在结果里。
-    static func capture(windowIDs: [CGWindowID], maxPixelSize: CGFloat = 560) async -> [CGWindowID: NSImage] {
+    /// fullResolution 为真时按窗口原本的大小截（给「原位预览」用），否则缩到 maxPixelSize 以内。
+    static func capture(windowIDs: [CGWindowID], maxPixelSize: CGFloat = 560, fullResolution: Bool = false) async -> [CGWindowID: NSImage] {
         guard isAuthorized, !windowIDs.isEmpty else { return [:] }
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false) else { return [:] }
         let wanted = Set(windowIDs)
@@ -35,7 +36,7 @@ enum Thumbnailer {
                 group.addTask {
                     let size = window.frame.size
                     guard size.width > 1, size.height > 1 else { return (window.windowID, nil) }
-                    let scale = min(1, maxPixelSize / max(size.width, size.height)) * 2
+                    let scale = (fullResolution ? 1 : min(1, maxPixelSize / max(size.width, size.height))) * 2
                     let configuration = SCStreamConfiguration()
                     configuration.width = max(1, Int(size.width * scale))
                     configuration.height = max(1, Int(size.height * scale))
@@ -57,7 +58,7 @@ enum Thumbnailer {
             let recovered = await Task.detached(priority: .userInitiated) { () -> [CGWindowID: CGImage] in
                 var images: [CGWindowID: CGImage] = [:]
                 for id in missing {
-                    if let image = PrivateAPI.captureWindow(id) { images[id] = image }
+                    if let image = PrivateAPI.captureWindow(id, fullResolution: fullResolution) { images[id] = image }
                 }
                 return images
             }.value

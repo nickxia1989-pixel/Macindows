@@ -8,6 +8,12 @@ if let index = arguments.firstIndex(of: "--render-sample"), arguments.indices.co
     exit(0)
 }
 
+if let index = arguments.firstIndex(of: "--show-sample") {
+    NSApplication.shared.setActivationPolicy(.accessory)
+    SampleRender.show(arguments: Array(arguments[(index + 1)...]))
+    exit(0)
+}
+
 if arguments.contains("--selftest") {
     _ = NSApplication.shared
     SelfTest.run()

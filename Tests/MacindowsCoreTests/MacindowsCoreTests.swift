@@ -33,6 +33,15 @@ final class ClickPolicyTests: XCTestCase {
         XCTAssertEqual(dockClickAction(for: state(front: false, hidden: true, windows: 1, minimized: 1)), .passThrough)
     }
 
+    func testSingleWindowOnAnotherSpaceIsLeftToTheDock() {
+        // 窗口在别的桌面上：程序坞会切过去。哪怕 App 算「最前」，也不能把看不见的窗口最小化掉
+        let elsewhere = AppWindowState(isRunning: true, isFrontmost: true, isHidden: false, windowCount: 1, minimizedCount: 0, elsewhereCount: 1)
+        XCTAssertEqual(dockClickAction(for: elsewhere), .passThrough)
+        // 别的桌面上有窗口、这里也有：照样列出来挑
+        let both = AppWindowState(isRunning: true, isFrontmost: true, isHidden: false, windowCount: 2, minimizedCount: 0, elsewhereCount: 1)
+        XCTAssertEqual(dockClickAction(for: both), .showWindowList)
+    }
+
     func testMultipleWindowsAlwaysShowTheList() {
         XCTAssertEqual(dockClickAction(for: state(front: true, windows: 2)), .showWindowList)
         XCTAssertEqual(dockClickAction(for: state(front: false, windows: 3, minimized: 3)), .showWindowList)
@@ -41,20 +50,82 @@ final class ClickPolicyTests: XCTestCase {
 }
 
 final class WindowFilterTests: XCTestCase {
+    private func window(_ subrole: String?, level: Int? = 0, size: CGSize? = CGSize(width: 900, height: 600), title: String? = "文稿",
+                        role: String? = "AXWindow", bundle: String? = "com.example.app", path: String? = nil) -> WindowTraits {
+        WindowTraits(role: role, subrole: subrole, title: title, size: size, level: level, bundleID: bundle, executablePath: path)
+    }
+
     func testStandardWindowsAreListed() {
-        XCTAssertTrue(isListableWindow(subrole: "AXStandardWindow", isMinimized: false))
-        XCTAssertTrue(isListableWindow(subrole: "AXStandardWindow", isMinimized: true))
+        XCTAssertTrue(isListableWindow(window("AXStandardWindow")))
+        // 层级读不到时不因此丢掉窗口
+        XCTAssertTrue(isListableWindow(window("AXStandardWindow", level: nil, size: nil)))
     }
 
-    func testMinimizedWindowsReportedAsDialogsAreStillListed() {
-        XCTAssertTrue(isListableWindow(subrole: "AXDialog", isMinimized: true))
+    func testDialogsOnTheNormalLevelAreListed() {
+        // 最小化或被隐藏的窗口会被系统改报成对话框；有些 App 的主窗口本来就是对话框
+        XCTAssertTrue(isListableWindow(window("AXDialog")))
     }
 
-    func testPanelsAndOnScreenDialogsAreNotListed() {
-        XCTAssertFalse(isListableWindow(subrole: "AXDialog", isMinimized: false))
-        XCTAssertFalse(isListableWindow(subrole: "AXFloatingWindow", isMinimized: false))
-        XCTAssertFalse(isListableWindow(subrole: "AXSystemDialog", isMinimized: true))
-        XCTAssertFalse(isListableWindow(subrole: nil, isMinimized: true))
+    func testFloatingPanelsAreNotListed() {
+        // 提醒条之类：类型是对话框，但浮在普通窗口上面
+        XCTAssertFalse(isListableWindow(window("AXDialog", level: 3)))
+        XCTAssertFalse(isListableWindow(window("AXStandardWindow", level: 8)))
+        XCTAssertFalse(isListableWindow(window("AXFloatingWindow")))
+        XCTAssertFalse(isListableWindow(window("AXSystemDialog")))
+        XCTAssertFalse(isListableWindow(window("AXUnknown")))
+        XCTAssertFalse(isListableWindow(window(nil)))
+    }
+
+    func testTinyWindowsAreNotListed() {
+        XCTAssertFalse(isListableWindow(window("AXStandardWindow", size: CGSize(width: 1, height: 1))))
+        // 和菜单栏一样扁的隐形窗口
+        XCTAssertFalse(isListableWindow(window("AXStandardWindow", size: CGSize(width: 2560, height: 30))))
+        XCTAssertTrue(isListableWindow(window("AXStandardWindow", size: CGSize(width: 100, height: 50))))
+    }
+
+    func testAppSpecificRules() {
+        // JetBrains：没有标题的对话框是隐形窗口，有标题的才算
+        XCTAssertFalse(isListableWindow(window("AXDialog", title: "", bundle: "com.jetbrains.intellij")))
+        XCTAssertTrue(isListableWindow(window("AXDialog", title: "设置", bundle: "com.jetbrains.intellij")))
+        XCTAssertTrue(isListableWindow(window("AXStandardWindow", title: "", bundle: "com.google.android.studio")))
+        // Steam：窗口不报类型，靠标题认
+        XCTAssertTrue(isListableWindow(window(nil, title: "Steam", bundle: "com.valvesoftware.steam")))
+        XCTAssertFalse(isListableWindow(window("AXStandardWindow", title: "", bundle: "com.valvesoftware.steam")))
+        // Firefox 全屏视频
+        XCTAssertTrue(isListableWindow(window("AXUnknown", bundle: "org.mozilla.firefox")))
+        XCTAssertFalse(isListableWindow(window("AXUnknown", size: CGSize(width: 400, height: 300), bundle: "org.mozilla.firefox")))
+        // Adobe 的主窗口报成浮动窗口；别的 App 的浮动窗口不受影响
+        XCTAssertTrue(isListableWindow(window("AXFloatingWindow", bundle: "com.adobe.AfterEffects")))
+        // CrossOver 里的 Windows 程序
+        XCTAssertTrue(isListableWindow(window("AXUnknown", bundle: nil, path: "/Users/me/Library/wine/bin/wine64-preloader")))
+        XCTAssertFalse(isListableWindow(window("AXUnknown", level: 3, bundle: nil, path: "/Users/me/Library/wine/bin/wine64-preloader")))
+        // 安卓模拟器
+        XCTAssertTrue(isListableWindow(window("AXUnknown", title: "Pixel 9", bundle: nil, path: "/sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64")))
+        XCTAssertFalse(isListableWindow(window("AXUnknown", title: "Window", bundle: nil, path: "/sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64")))
+        // 置顶的 scrcpy
+        XCTAssertTrue(isListableWindow(window("AXStandardWindow", level: 3, bundle: nil, path: "/opt/homebrew/bin/scrcpy")))
+    }
+}
+
+final class SpaceTests: XCTestCase {
+    func testOnlyWindowsOnAnotherExistingSpaceCount() {
+        let active: Set<Int> = [1, 852], known: Set<Int> = [1, 7, 852]
+        XCTAssertTrue(isOnAnotherSpace(windowSpaces: [7], activeSpaces: active, knownSpaces: known))
+        // 在当前桌面上的不算「别的桌面」
+        XCTAssertFalse(isOnAnotherSpace(windowSpaces: [1], activeSpaces: active, knownSpaces: known))
+        XCTAssertFalse(isOnAnotherSpace(windowSpaces: [7, 852], activeSpaces: active, knownSpaces: known))
+        // App 留着没显示的窗口：不在任何桌面上
+        XCTAssertFalse(isOnAnotherSpace(windowSpaces: [], activeSpaces: active, knownSpaces: known))
+        // 挂在一个已经不存在的桌面上
+        XCTAssertFalse(isOnAnotherSpace(windowSpaces: [99], activeSpaces: active, knownSpaces: known))
+    }
+
+    func testTabsOfOneWindowCollapse() {
+        let tab = CGRect(x: 100, y: 80, width: 1200, height: 800)
+        let frames: [CGRect?] = [tab, CGRect(x: 300, y: 200, width: 900, height: 600), tab.offsetBy(dx: 0.2, dy: -0.3), nil, tab, nil]
+        // 位置大小相同的只留最前面的一个；读不到位置的不参与合并
+        XCTAssertEqual(duplicateTabIndices(frames: frames), [2, 4])
+        XCTAssertEqual(duplicateTabIndices(frames: []), [])
     }
 }
 

@@ -38,9 +38,11 @@ The Dock is beautiful, just not very practical. Macindows fixes that and touches
 
 Rest the pointer on any app icon in the Dock:
 
-- **See every window of that app**, whether open, hidden or minimized. Click one to switch to it.
+- **See every window of that app**, whether open, hidden, minimized, on another desktop or in full screen. Click one to switch to it.
 - **One row, in the order the windows were opened.** The order does not change as you switch. With many windows the previews shrink; with even more, the panel becomes a list of titles.
 - **Thumbnails are optional.** Without Screen Recording permission the panel shows window titles only, and everything else works the same.
+- **Pause to see the whole window.** Rest the pointer on a thumbnail and that window is shown at its real position, without actually switching to it. You can turn this off in the menu.
+- **The same material as the Dock.** The panel uses the Dock's own kind of glass and sits right against it, with no name label wedged in between.
 - **Running apps with no windows** get a card of the same size holding a blank window with the app icon. Click it to open a new window.
 - **Close windows in place** with the close button on each item, or with a middle click.
 - **Hard to trigger by accident.** Passing over other icons on the way to the panel does not switch it away.
@@ -59,7 +61,7 @@ Right-click menus and the Dock's other built-in interactions are still handled b
 
 ### Menu bar
 
-The four-pane icon in the menu bar lets you pause or enable Macindows, turn window thumbnails on or off, launch at login, check permission status, reveal the log folder, and quit.
+The four-pane icon in the menu bar lets you pause or enable Macindows, turn window thumbnails and the in-place preview on or off, launch at login, check permission status, reveal the log folder, and quit.
 
 ## Install
 
@@ -83,30 +85,32 @@ The installer is signed with a Developer ID and notarized by Apple, so macOS ope
 | Permission | Required | What it is used for |
 | --- | --- | --- |
 | Accessibility | Yes | Knowing which Dock icon the pointer is on; listing, switching, minimizing and closing windows; recognizing clicks on Dock icons |
-| Screen Recording (listed as Screen & System Audio Recording in System Settings) | Optional | Only for the window thumbnails in the hover panel |
+| Screen Recording (listed as Screen & System Audio Recording in System Settings) | Optional | Window thumbnails and the in-place preview; also capturing the small patch of screen behind the Dock's name label, to cover the label |
 
 These permissions are broad, so here is exactly what Macindows does with them:
 
 - **No network access.** There are no network requests in the code: no analytics, no crash reporting, no update checks, no account.
-- **Thumbnails live in memory only.** They are shown in the hover panel, never written to disk, and never leave your Mac.
-- **Only two things are stored locally.** Two preferences (enabled, show thumbnails), and a troubleshooting log in `~/Library/Logs/Macindows/`. The log records app names and window counts, never window titles or images, and is trimmed once it passes roughly 512 KB.
-- **The keyboard is not monitored.** Only pointer movement and clicks are observed, and only left clicks that land on a Dock icon are acted on.
+- **Captured images live in memory only.** They are only shown on screen, never written to disk, and never leave your Mac.
+- **Only two things are stored locally.** Three preferences (enabled, show thumbnails, in-place preview), and a troubleshooting log in `~/Library/Logs/Macindows/`. The log records app names and window counts, never window titles or images, and is trimmed once it passes roughly 512 KB.
+- **The keyboard is not monitored.** Pointer movement is tracked only while the hover panel is showing, and only left clicks that land on a Dock icon are acted on.
 - **You can verify all of this.** The full source is in this repository. Check each point above against the code, or build the app yourself.
 
 ## How It Works
 
-- **Reading the Dock**: the positions of Dock icons and the apps behind them come from the system Accessibility API. The Dock process itself is never modified or injected into, and System Integrity Protection stays on.
-- **The hover panel**: a floating window owned by Macindows, placed above the icon. It is entirely separate from the Dock.
+- **Reading the Dock**: the positions of Dock icons and the apps behind them come from the system Accessibility API, and the Dock itself reports which icon the pointer is on. The Dock process is never modified or injected into, and System Integrity Protection stays on.
+- **The hover panel**: a floating window owned by Macindows, placed right against the Dock above the icon. It is entirely separate from the Dock.
+- **The name label**: macOS has no way to turn it off. With thumbnails on, Macindows covers it with what was on screen behind it; with thumbnails off, the panel sits clear of the label instead.
 - **Click rules**: clicks on Dock icons are observed and, following the table above, either handled by Macindows or passed back to the Dock untouched.
 
-One caveat: to switch to one specific window precisely, and to produce thumbnails for minimized windows, Macindows relies on a small number of undocumented system interfaces. Each has a fallback, but a major macOS update may require changes. This is also why it cannot be distributed on the Mac App Store.
+One caveat: to switch to one specific window precisely, to produce thumbnails for minimized windows, to find windows on other desktops, and to use the Dock's kind of glass, Macindows relies on a small number of undocumented system interfaces. Each has a fallback, but a major macOS update may require changes. This is also why it cannot be distributed on the Mac App Store.
 
 ## Known Limitations
 
 - macOS 26 or later only, because the hover panel uses the Liquid Glass material introduced in that release.
 - Fully tested only on macOS 27 with Apple silicon so far. The installer includes an Intel build, but it has not been tested on real hardware.
-- A Dock on the side of the screen works, but the spacing between the panel and the Dock's name label is an estimate.
-- Windows on other Spaces or in full screen have not been thoroughly verified.
+- A Dock on the side of the screen works, but the panel does not sit against it there. It stays clear of the Dock's name label, and that spacing is an estimate.
+- Windows on other desktops have only been verified with full-screen windows so far. Extra desktops created in Mission Control have not been tested.
+- A few apps report their windows in unusual ways (JetBrains IDEs, Steam, Firefox full-screen video and others). The rules for them come from the experience of similar tools and have not been tested one by one.
 
 ## Build from Source
 
@@ -146,10 +150,11 @@ The layout of the opened disk image (window size, icon positions, background) is
 ## Troubleshooting
 
 ```bash
-swift test                                              # unit tests for the click rules and coordinate math
+swift test                                              # unit tests for the click rules, window rules and coordinate math
 open -n /Applications/Macindows.app --args --diagnose   # writes ~/Library/Logs/Macindows/diagnose.txt
 open -n /Applications/Macindows.app --args --selftest   # simulates a hover (moves the pointer briefly), writes selftest.txt
 build/Macindows.app/Contents/MacOS/Macindows --render-sample /tmp/macindows-sample   # renders the panel layout with sample data
+build/Macindows.app/Contents/MacOS/Macindows --show-sample dark 3                    # shows the real glass panel with sample data above the Dock for a few seconds
 ```
 
 **A permission switch is on but has no effect?** In the corresponding list in System Settings, select Macindows, remove it with the “−” button, then add it again. This happens when a self-built copy and a released copy have both been installed on the same Mac: they are signed differently, so macOS treats them as two apps and the old grant does not match the new one.

@@ -22,14 +22,24 @@ enum Diagnose {
         add("屏幕录制权限: \(Thumbnailer.isAuthorized ? "已授权" : "未授权")")
         add("登录时自动启动: \(SMAppService.mainApp.status == .enabled ? "已开启" : "未开启")")
         add("私有接口: " + PrivateAPI.availability.map { "\($0.0)=\($0.1 ? "可用" : "缺失")" }.joined(separator: " "))
+        add("玻璃材质: \(DockGlass.diagnosis)")
+        if let spaces = PrivateAPI.spaceLayout() {
+            add("桌面: 共 \(spaces.all.count) 个，正在显示 \(spaces.active.count) 个" + (spaces.hasInactiveSpaces ? "（会另外查找别的桌面上的窗口）" : ""))
+        } else {
+            add("桌面: 读不到")
+        }
         for screen in NSScreen.screens {
             add("屏幕 \(screen.localizedName): 全部\(brief(screen.frame)) 可用\(brief(screen.visibleFrame))")
         }
 
         if Accessibility.isTrusted {
+            Accessibility.limitWaiting()
             let dock = DockInspector()
-            dock.refresh()
+            dock.locate()
             add("程序坞图标区域: \(brief(dock.frame))")
+            dock.start()
+            add("悬停通知可订阅: \(dock.isListening ? "是" : "否")；程序坞此刻说鼠标停在: \(dock.hoveredItem()?.title ?? "没有图标上")")
+            dock.stop()
             let items = dock.allItems()
             add("程序坞图标 \(items.count) 个")
             for item in items {
@@ -41,14 +51,8 @@ enum Diagnose {
                 line += " 运行中 最前=\(snapshot.isFrontmost) 隐藏=\(snapshot.isHidden) 窗口=\(snapshot.windows.count) 点击→\(dockClickAction(for: snapshot.state))"
                 add(line)
                 for window in snapshot.windows {
-                    add("      · \(window.title.prefix(24)) 窗口号=\(window.id.map(String.init) ?? "无") 最小化=\(window.isMinimized) 主窗口=\(window.isMain)")
+                    add("      · \(window.title.prefix(24)) 窗口号=\(window.id.map(String.init) ?? "无") 最小化=\(window.isMinimized) 主窗口=\(window.isMain)\(window.isOnCurrentSpace ? "" : " 在别的桌面")")
                 }
-            }
-            if let probe = items.first(where: \.isApplication) {
-                let fresh = DockInspector()
-                fresh.refresh()
-                let hit = fresh.item(at: CGPoint(x: probe.frame.midX, y: probe.frame.midY))
-                add("按位置查图标自检（\(probe.title)）: " + (hit.map { $0.isSame(as: probe) ? "通过" : "返回了别的图标 \($0.title)" } ?? "没有返回图标"))
             }
             let interceptor = ClickInterceptor()
             add("点击拦截可创建: \(interceptor.start() ? "是" : "否")")
@@ -71,8 +75,9 @@ enum SelfTest {
         defer { try? lines.joined(separator: "\n").appending("\n").write(to: url, atomically: true, encoding: .utf8) }
         guard Accessibility.isTrusted else { lines.append("未授权辅助功能"); return }
 
+        Accessibility.limitWaiting()
         let dock = DockInspector()
-        dock.refresh()
+        dock.locate()
         let items = dock.allItems().filter(\.isApplication)
         func windowCount(_ item: DockItem) -> Int { item.runningApp.flatMap { WindowIndex.snapshot(of: $0) }?.windows.count ?? 0 }
         guard let target = items.first(where: { windowCount($0) > 0 }) else {
@@ -130,13 +135,15 @@ enum SelfTest {
             move(origin); return
         }
         let gap = horizontal ? dock.frame.minY - panel.maxY : (onLeft ? panel.minX - dock.frame.maxX : dock.frame.minX - panel.maxX)
-        lines.append("窗口列表: 已弹出，离程序坞 \(Int(gap.rounded())) 点（系统的名称气泡占其中约 30 点）")
+        lines.append("窗口列表: 已弹出，离程序坞图标区域 \(Int(gap.rounded())) 点（贴着程序坞，系统的名称气泡被盖在它底下）")
 
         // 停在列表和程序坞之间的空隙里，超过关闭延时也不应该关
-        let inGap = horizontal ? CGPoint(x: target.frame.midX, y: dock.frame.minY - gap / 2)
-                               : CGPoint(x: onLeft ? dock.frame.maxX + gap / 2 : dock.frame.minX - gap / 2, y: target.frame.midY)
-        move(inGap); spin(0.05); move(CGPoint(x: inGap.x + 1, y: inGap.y)); spin(0.8)
-        lines.append("鼠标停在空隙里 0.8 秒: " + (panelFrame() != nil ? "列表保持显示" : "列表被关掉了"))
+        if gap >= 2 {
+            let inGap = horizontal ? CGPoint(x: target.frame.midX, y: dock.frame.minY - gap / 2)
+                                   : CGPoint(x: onLeft ? dock.frame.maxX + gap / 2 : dock.frame.minX - gap / 2, y: target.frame.midY)
+            move(inGap); spin(0.05); move(CGPoint(x: inGap.x + 1, y: inGap.y)); spin(0.8)
+            lines.append("鼠标停在空隙里 0.8 秒: " + (panelFrame() != nil ? "列表保持显示" : "列表被关掉了"))
+        }
         move(CGPoint(x: panel.midX, y: panel.midY)); spin(0.05); move(CGPoint(x: panel.midX + 1, y: panel.midY)); spin(0.6)
         lines.append("鼠标移进列表: " + (panelFrame() != nil ? "列表保持显示" : "列表被关掉了"))
 
@@ -240,7 +247,8 @@ enum SelfTest {
             lines.append("移开再回来: " + (panelFrame() != nil ? "悬停窗正常弹出" : "悬停窗没有弹出"))
         }
 
-        move(outside); spin(0.4)
+        // 移开后悬停窗先淡出 0.4 秒再收起
+        move(outside); spin(0.7)
         lines.append("鼠标移开后: " + (panelFrame() == nil ? "列表已关闭" : "列表还开着"))
         move(origin); spin(0.1)
     }

@@ -3,6 +3,7 @@
 /* Menu bar menu */
 "启用 Macindows" = "Enable Macindows";
 "显示窗口缩略图" = "Show Window Thumbnails";
+"停在缩略图上时预览整个窗口" = "Preview the Whole Window When Resting on a Thumbnail";
 "需要“录屏与系统录音”权限，点此打开系统设置" = "Needs Screen & System Audio Recording Permission. Click to Open System Settings";
 "授权后请重新打开 Macindows" = "Reopen Macindows after granting it.";
 "登录时自动启动" = "Launch at Login";

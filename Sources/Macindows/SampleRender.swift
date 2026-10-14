@@ -2,20 +2,46 @@ import AppKit
 
 /// `Macindows --render-sample <目录>`：用假数据把悬停窗的版面画成图片，不需要任何权限。
 /// 只用于检查排版；玻璃材质是合成器效果，离屏渲染里看不到，这里用纯色底代替。
+/// 要看真玻璃用 `--show-sample`。
 enum SampleRender {
+    /// `Macindows --show-sample [dark|light] [窗口数] [秒数] [list]`：把真正的悬停窗用假数据摆在主屏幕的程序坞上方几秒钟。
+    /// 不需要任何权限，用来实拍、和程序坞并排比较玻璃的质感。窗口数为 0 时显示「没有窗口」的那张卡片。
+    static func show(arguments: [String]) {
+        let dark = arguments.first != "light"
+        let count = arguments.dropFirst().first.flatMap(Int.init) ?? 3
+        let seconds = arguments.dropFirst(2).first.flatMap(Double.init) ?? 4
+        let thumbnails = !arguments.contains("list")
+        guard let screen = NSScreen.screens.first else { return }
+        let panel = PreviewPanel()
+        panel.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        let visible = screen.visibleFrame
+        let room = CGSize(width: visible.width - 24, height: visible.height - 24)
+        let icon = NSWorkspace.shared.icon(forFile: "/System/Applications/Notes.app")
+        let entries = count == 0 ? [PreviewEntry(title: "备忘录", aspect: nil, thumbnail: nil, isPlaceholder: true)] : sampleEntries(count, images: true)
+        let size = panel.render(entries: entries, thumbnails: thumbnails, placeholder: icon, maxSize: room)
+        panel.setCardOrigin(NSPoint(x: (visible.midX - size.width / 2).rounded(), y: visible.minY + 4))
+        panel.orderFrontRegardless()
+        panel.playEntrance(from: .bottom, duration: 0.175)
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { exit(0) }
+        NSApplication.shared.run()
+    }
+
+    private static let sampleTitles = ["traveler/horizon", "AXUIElement | Apple Developer Documentation", "Swift.org", "维基百科", "Hacker News", "设计笔记"]
+    private static let sampleAspects: [CGFloat] = [1.5, 0.95, 1.7, 1.3, 1.6, 0.8]
+
+    private static func sampleEntries(_ count: Int, images: Bool) -> [PreviewEntry] {
+        (0..<count).map { index in
+            let aspect = sampleAspects[index % sampleAspects.count]
+            // 每三个里留一个没有画面的，检查占位图标
+            let image = images && index % 3 != 2 ? sampleImage(aspect: aspect, hue: CGFloat(index % 6) * 0.07 + 0.5) : nil
+            return PreviewEntry(title: sampleTitles[index % sampleTitles.count], aspect: aspect, thumbnail: image)
+        }
+    }
+
     static func run(outputDirectory: String) {
         let directory = URL(fileURLWithPath: outputDirectory, isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let titles = ["traveler/horizon", "AXUIElement | Apple Developer Documentation", "Swift.org", "维基百科", "Hacker News", "设计笔记"]
-        let aspects: [CGFloat] = [1.5, 0.95, 1.7, 1.3, 1.6, 0.8]
-        func entries(_ count: Int, images: Bool) -> [PreviewEntry] {
-            (0..<count).map { index in
-                let aspect = aspects[index % aspects.count]
-                // 每三个里留一个没有画面的，检查占位图标
-                let image = images && index % 3 != 2 ? sampleImage(aspect: aspect, hue: CGFloat(index % 6) * 0.07 + 0.5) : nil
-                return PreviewEntry(title: titles[index % titles.count], aspect: aspect, thumbnail: image)
-            }
-        }
+        func entries(_ count: Int, images: Bool) -> [PreviewEntry] { sampleEntries(count, images: images) }
         let icon = NSImage(systemSymbolName: "safari", accessibilityDescription: nil)
         // 以一块 2560 宽的屏幕为例：3 个窗口正常大小，12 个整体缩小，30 个改成列表
         let room = CGSize(width: 2536, height: 1300)

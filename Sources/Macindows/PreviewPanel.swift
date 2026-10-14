@@ -1,4 +1,5 @@
 import AppKit
+import MacindowsCore
 
 /// 悬停窗里要展示的一个窗口。不区分它是开着、隐藏还是最小化：对「我要切到哪个窗口」来说这不重要。
 struct PreviewEntry {
@@ -20,8 +21,12 @@ final class FirstMouseButton: NSButton {
 final class PreviewItemView: NSView {
     static let rowHeight: CGFloat = 28
     static let titleFont = NSFont.systemFont(ofSize: 13)
+    /// 缩略图上方那一行（标题和关闭按钮）的高度
+    private static let headerHeight: CGFloat = 30
+    /// 标题底牌、关闭按钮的高度
+    private static let chipHeight: CGFloat = 22
     /// 一格里除缩略图之外占掉的宽和高（标题行与四周留白）
-    static let cellChrome = CGSize(width: 8, height: 30)
+    static let cellChrome = CGSize(width: 8, height: headerHeight + 4)
     /// 鼠标停上来时描在缩略图外面的那一圈的粗细
     private static let ringWidth: CGFloat = 3
     private static let thumbRadius: CGFloat = 6
@@ -34,6 +39,10 @@ final class PreviewItemView: NSView {
     private let thumbBound: CGSize?
     private let highlight = NSView()
     private let icon = NSImageView()
+    /// 垫在标题底下的底牌，只在缩略图那种版面里用。
+    /// 程序坞的玻璃非常透，字直接写在上面，背后一白或者一花就看不清；程序坞自己给图标名称配的也是一个带底色的气泡，这里照做
+    private let titleChip = NSView()
+    private let closeChip = NSView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let thumbView = NSImageView()
     /// 垫在缩略图底下的投影。缩略图自己要裁圆角，裁了就画不出投影，所以单独一层
@@ -55,6 +64,14 @@ final class PreviewItemView: NSView {
         highlight.layer?.backgroundColor = NSColor.clear.cgColor
         addSubview(highlight)
 
+        if thumbBound != nil {
+            for chip in [titleChip, closeChip] {
+                chip.wantsLayer = true
+                chip.layer?.cornerRadius = Self.chipHeight / 2
+                addSubview(chip)
+            }
+            closeChip.isHidden = true
+        }
         titleLabel.stringValue = entry.title
         titleLabel.font = Self.titleFont
         titleLabel.textColor = .labelColor
@@ -119,13 +136,20 @@ final class PreviewItemView: NSView {
         super.layout()
         let width = bounds.width, height = bounds.height
         if let bound = thumbBound {
-            titleLabel.frame = NSRect(x: 6, y: 5, width: max(0, width - 30), height: 17)
-            closeButton.frame = NSRect(x: width - 23, y: 4, width: 18, height: 18)
+            // 标题底牌贴着字的宽度走，放不下时截断；右边给关闭按钮留出位置
+            let chip = Self.chipHeight, top = ((Self.headerHeight - chip) / 2).rounded(), inset: CGFloat = 9
+            // 文字控件自己两侧各有 2 点留白，算宽度时要算上，不然刚好放得下的标题也会被截断
+            let text = (entry.title as NSString).size(withAttributes: [.font: Self.titleFont]).width.rounded(.up) + 4
+            let chipWidth = max(chip, min(text + (inset - 2) * 2, width - 8 - chip - 4))
+            titleChip.frame = NSRect(x: 4, y: top, width: chipWidth, height: chip)
+            titleLabel.frame = NSRect(x: 4 + inset - 2, y: top + (chip - 17) / 2, width: chipWidth - (inset - 2) * 2, height: 17)
+            closeChip.frame = NSRect(x: width - 4 - chip, y: top, width: chip, height: chip)
+            closeButton.frame = closeChip.frame
             // 每一格大小相同，缩略图按窗口自己的比例缩进这一格里并居中
             let aspect = entry.thumbnail.map { $0.size.width / max($0.size.height, 1) } ?? entry.aspect ?? (bound.width / bound.height)
             let fitted = min(bound.width / aspect, bound.height)
             let size = CGSize(width: (fitted * aspect).rounded(), height: fitted.rounded())
-            let frame = NSRect(x: ((width - size.width) / 2).rounded(), y: (26 + (bound.height - size.height) / 2).rounded(),
+            let frame = NSRect(x: ((width - size.width) / 2).rounded(), y: (Self.headerHeight + (bound.height - size.height) / 2).rounded(),
                                width: size.width, height: size.height)
             thumbView.frame = frame
             ring.frame = frame.insetBy(dx: -Self.ringWidth, dy: -Self.ringWidth)
@@ -171,6 +195,7 @@ final class PreviewItemView: NSView {
         didSet {
             guard isHighlighted != oldValue else { return }
             closeButton.isHidden = !isHighlighted || entry.isPlaceholder
+            closeChip.isHidden = closeButton.isHidden
             updateColors()
         }
     }
@@ -197,7 +222,13 @@ final class PreviewItemView: NSView {
             closeButton.contentTintColor = isHighlighted ? NSColor.white.withAlphaComponent(0.9) : .secondaryLabelColor
             return
         }
-        closeButton.contentTintColor = .secondaryLabelColor
+        // 底牌的深浅跟系统外观走，和程序坞的名称气泡一样：深色外观下是深色底白字，浅色外观下是浅色底黑字。
+        // 底色够实，字的对比度就由它保证，不再取决于玻璃背后是什么
+        let chipFill = dark ? NSColor.black.withAlphaComponent(0.5) : NSColor.white.withAlphaComponent(0.78)
+        titleChip.layer?.backgroundColor = chipFill.cgColor
+        closeChip.layer?.backgroundColor = chipFill.cgColor
+        titleLabel.textColor = dark ? .white : NSColor.black.withAlphaComponent(0.85)
+        closeButton.contentTintColor = dark ? NSColor.white.withAlphaComponent(0.85) : NSColor.black.withAlphaComponent(0.6)
         ring.isHidden = !isHighlighted
         effectiveAppearance.performAsCurrentDrawingAppearance {
             ring.layer?.borderColor = NSColor.controlAccentColor.cgColor
@@ -206,7 +237,8 @@ final class PreviewItemView: NSView {
             if entry.isPlaceholder {
                 thumbView.layer?.backgroundColor = Self.emptyFill(dark: dark).cgColor
             } else {
-                thumbView.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
+                // 画面还没截到的窗口：一扇不透明的空窗口。不能透——悬停窗贴着程序坞时，底下压着程序坞的名称气泡
+                thumbView.layer?.backgroundColor = NSColor(white: dark ? 0.2 : 0.95, alpha: 1).cgColor
             }
         }
         thumbShadow.layer?.shadowOpacity = dark ? 0.35 : 0.22
@@ -291,13 +323,18 @@ final class GlassRimView: NSView {
 
 /// 悬停窗的内容：一组窗口，没有标题行。
 final class PreviewContentView: NSView {
-    static let padding: CGFloat = 6
+    static let padding: CGFloat = 8
     static let spacing: CGFloat = 4
     /// 缩略图再窄就看不清了，这时改成竖排的标题列表（和 Windows 任务栏的做法一致）
     static let minThumbWidth: CGFloat = 104
 
     var onSelect: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
+    /// 鼠标停着的那一项换了（nil 表示哪一项都不在）。内容整批重建不算换：只要还停在同一个位置上就不会再报
+    var onHighlight: ((Int?) -> Void)?
+    private(set) var highlightedIndex: Int?
+    /// 这一次排成了竖排的标题列表，而不是一排缩略图
+    private(set) var isList = false
     private(set) var items: [PreviewItemView] = []
     private var extras: [NSView] = []
     private var tracking: NSTrackingArea?
@@ -316,6 +353,7 @@ final class PreviewContentView: NSView {
         reset()
         var size: NSSize?
         if thumbnails { size = layoutCells(entries, placeholder: placeholder, maxWidth: maxSize.width) }
+        isList = size == nil
         let result = size ?? layoutRows(entries, maxSize: maxSize)
         for (index, item) in items.enumerated() {
             item.onSelect = { [weak self] in self?.onSelect?(index) }
@@ -336,8 +374,14 @@ final class PreviewContentView: NSView {
     /// point 是窗口坐标；传 nil 表示鼠标不在这里
     func updateHover(windowPoint: NSPoint?) {
         let point = windowPoint.map { convert($0, from: nil) }
-        for item in items {
+        var index: Int?
+        for (offset, item) in items.enumerated() {
             item.isHighlighted = point.map { item.frame.contains($0) } ?? false
+            if item.isHighlighted { index = offset }
+        }
+        if index != highlightedIndex {
+            highlightedIndex = index
+            onHighlight?(index)
         }
     }
 
@@ -421,12 +465,6 @@ final class PreviewContentView: NSView {
 final class PreviewPanel: NSPanel {
     /// 玻璃四周留出的透明边，用来画阴影
     static let margin: CGFloat = 28
-    /// 蒙在玻璃上的那层薄色的浓度。用的是系统里最透的那种玻璃；完全不蒙的话，深色外观下背后一亮白字就看不清
-    /// （实测对比过），0.18 是文字在亮、暗两种背景上都还清楚的最小值附近
-    static let darkVeil: CGFloat = 0.18
-    /// 浅色外观下可以略透一点，但不能再少：实测降到 0.04 时，背后一暗（深色壁纸、黑色的终端窗口），黑字就看不清了。
-    /// 白色的窗口缩略图和发白的板子分不开的问题不靠调透来解决（背后也是白的时候调透没有用），靠缩略图自己的描边和投影
-    static let lightVeil: CGFloat = 0.14
 
     let content = PreviewContentView()
     private let glass = NSGlassEffectView()
@@ -434,11 +472,13 @@ final class PreviewPanel: NSPanel {
     private let rimView = GlassRimView()
     private let shadowLayer = CALayer()
     private let shadowMask = CAShapeLayer()
+    private var appearanceObservation: NSKeyValueObservation?
+    /// 玻璃此刻用的是不是程序坞那种；还没定过时为 nil
+    private var glassIsDock: Bool?
 
     init() {
         glass.contentView = content
         super.init(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
-        configureGlass(style: .clear, darkVeil: Self.darkVeil, lightVeil: Self.lightVeil)
         isFloatingPanel = true
         // 只有需要键盘输入的控件才会让面板成为键盘焦点；点条目和按钮不会抢走当前窗口的焦点
         becomesKeyOnlyIfNeeded = true
@@ -463,22 +503,64 @@ final class PreviewPanel: NSPanel {
         root.addSubview(glass)
         root.addSubview(rimView)
         contentView = root
+        // 玻璃的深浅可能被单独定死（见 useGlass），里面的内容始终跟着系统的深浅外观走
+        appearanceObservation = observe(\.effectiveAppearance, options: [.initial]) { panel, _ in
+            panel.content.appearance = panel.effectiveAppearance
+        }
     }
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
-    /// 玻璃的通透程度。clear 是系统提供的更透的一种玻璃；veil 是在它上面再蒙的一层薄色（深色外观蒙黑、浅色外观蒙白），
-    /// 用来保住文字的可读性：0 最透，越大越接近磨砂
-    func configureGlass(style: NSGlassEffectView.Style, darkVeil: CGFloat, lightVeil: CGFloat) {
-        glass.style = style
-        glass.tintColor = NSColor(name: nil) { appearance in
-            appearance.isDark ? NSColor.black.withAlphaComponent(darkVeil) : NSColor.white.withAlphaComponent(lightVeil)
+    /// 悬停窗从不成为当前窗口，而系统会把非当前窗口里的玻璃画成发闷的磨砂（实测对比过：同一块玻璃，
+    /// 只差这一项，一个通透、边缘有折射，一个像蒙了层雾）。程序坞的玻璃一直是通透的那种，
+    /// 所以让悬停窗也始终按「当前窗口」的样子来画。这是 NSWindow 一个未公开的方法，Chrome、WebKit 也这样改写它。
+    @objc(hasKeyAppearance) var alwaysLooksActive: Bool { true }
+
+    /// 出现时从程序坞那一侧滑出来一小段。只挪画面，窗口本身已经在最终的位置上，鼠标该点哪还是点哪
+    func playEntrance(from edge: DockEdge, duration: TimeInterval) {
+        guard let layer = root.layer else { return }
+        let distance: CGFloat = 7
+        let offset: CGSize
+        switch edge {
+        case .bottom: offset = CGSize(width: 0, height: -distance)
+        case .left: offset = CGSize(width: -distance, height: 0)
+        case .right: offset = CGSize(width: distance, height: 0)
         }
+        let slide = CABasicAnimation(keyPath: "transform.translation")
+        slide.fromValue = NSValue(size: offset)
+        slide.toValue = NSValue(size: .zero)
+        slide.duration = duration
+        slide.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        layer.add(slide, forKey: "entrance")
+    }
+
+    /// 两种版面用两种玻璃。
+    ///
+    /// 一排缩略图：程序坞的那种玻璃。它非常透，和程序坞摆在一起是同一种质感；这种版面里的东西都有自己的底
+    /// （窗口画面不透明，标题有底牌），不怕背后花。
+    /// 标题列表：字直接写在玻璃上，所以用系统给菜单这类界面准备的磨砂玻璃，背后是什么都看得清字。
+    /// 拿不到程序坞那种玻璃的系统上（见 DockGlass），两种版面都用磨砂的。
+    private func useGlass(dock: Bool) {
+        let wantsDock = dock && DockGlass.variant != nil
+        guard wantsDock != glassIsDock else { return }
+        glassIsDock = wantsDock
+        if wantsDock, DockGlass.apply(to: glass) {
+            // 实测程序坞的玻璃不随深浅外观变：深色外观下它也是浅色外观里那种通透的样子
+            // （并排取色：垫黑底时两者都是 53，垫白底时都是 234；按深色外观画的话是 21 和 191，明显更暗）
+            glass.appearance = NSAppearance(named: .aqua)
+        } else {
+            glass.style = .regular
+            glass.appearance = nil
+        }
+        // 程序坞那种玻璃自带边缘的折射和高光，不用再补；磨砂的那种边缘很平，补一圈
+        rimView.isHidden = wantsDock
     }
 
     func render(entries: [PreviewEntry], thumbnails: Bool, placeholder: NSImage?, maxSize: CGSize) -> NSSize {
-        apply(content.configure(entries: entries, thumbnails: thumbnails, placeholder: placeholder, maxSize: maxSize), cornerRadius: 16)
+        let size = content.configure(entries: entries, thumbnails: thumbnails, placeholder: placeholder, maxSize: maxSize)
+        useGlass(dock: !content.isList)
+        return apply(size, cornerRadius: 20)
     }
 
     private func apply(_ size: NSSize, cornerRadius: CGFloat) -> NSSize {

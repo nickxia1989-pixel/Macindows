@@ -1,6 +1,7 @@
 import AppKit
 import MacindowsCore
 import ServiceManagement
+import os
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
@@ -8,14 +9,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let interceptor = ClickInterceptor()
     private var onboarding: OnboardingWindowController?
     private var trustTimer: Timer?
+    private var healthTimer: Timer?
     private var running = false
     private let defaults = UserDefaults.standard
+    /// 「启用」开关的一份副本，给点击监听的线程读
+    private let enabled = OSAllocatedUnfairLock(initialState: true)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.prepare()
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
         log("launch Macindows \(version) on macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
-        defaults.register(defaults: ["enabled": true, "thumbnails": false])
+        defaults.register(defaults: ["enabled": true, "thumbnails": false, "peek": true])
         buildStatusItem()
 
         if Accessibility.promptIfNeeded() {
@@ -38,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         log("terminate")
+        healthTimer?.invalidate()
         interceptor.stop()
         hover.stop()
         Log.flush()
@@ -46,45 +51,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func startServices() {
         guard !running else { return }
         running = true
-        hover.isEnabled = defaults.bool(forKey: "enabled")
+        Accessibility.limitWaiting()
+        setEnabled(defaults.bool(forKey: "enabled"))
         hover.wantsThumbnails = defaults.bool(forKey: "thumbnails")
-        hover.onDrag = { [weak self] in self?.interceptor.mouseDragged(to: $0) }
+        hover.wantsPeek = defaults.bool(forKey: "peek")
         hover.start()
 
         interceptor.decide = { [weak self] point in self?.decide(clickAt: point) ?? .passThrough }
-        interceptor.onMouseDown = { [weak self] point in self?.hover.mouseDown(at: point, opensMenu: false) }
+        interceptor.onMouseDown = { [weak self] point, isRightButton in self?.hover.mouseDown(at: point, opensMenu: isRightButton) }
         // 开了缩略图却还没有屏幕录制权限（例如刚换了新的应用标识）：让系统弹出授权请求
         if hover.wantsThumbnails, !Thumbnailer.isAuthorized { Thumbnailer.requestAccess() }
         let tapped = interceptor.start()
-        log("services started, click interception \(tapped ? "on" : "FAILED")")
+        let health = Timer(timeInterval: 5, repeats: true) { [weak self] _ in self?.interceptor.reviveIfNeeded() }
+        RunLoop.main.add(health, forMode: .common)
+        healthTimer = health
+        log("services started, click interception \(tapped ? "on" : "FAILED"), hover notifications \(hover.dock.isListening ? "on" : "FAILED"), glass: \(DockGlass.diagnosis)")
     }
 
-    /// 鼠标在程序坞上按下时：按规则决定截不截这次点击
+    private func setEnabled(_ value: Bool) {
+        hover.isEnabled = value
+        enabled.withLock { $0 = value }
+    }
+
+    /// 鼠标左键在程序坞上按下时：按规则决定截不截这次点击。
+    ///
+    /// 这里跑在点击监听的线程上（见 ClickInterceptor），只碰可以跨线程的东西：开关的副本、程序坞的范围、
+    /// 直接向程序坞和目标 App 问话。要动悬停窗的都丢回主线程。
     private func decide(clickAt point: CGPoint) -> ClickInterceptor.Decision {
-        guard hover.isEnabled else { return .passThrough }
-        hover.dock.refresh(maxAge: 1)
-        guard hover.dock.contains(point), let item = hover.dock.item(at: point), item.isApplication else { return .passThrough }
+        // 不在程序坞范围里的点击到此为止，不向任何进程问话
+        guard enabled.withLock({ $0 }), hover.dock.contains(point) else { return .passThrough }
+        // 点的是哪个图标以程序坞自己说的为准；它的说法偶尔慢半拍，所以再核对一下位置
+        guard let item = hover.dock.hoveredItem(), item.isApplication, hover.dock.isPoint(point, over: item) else { return .passThrough }
         guard let app = item.runningApp, let snapshot = WindowIndex.snapshot(of: app) else {
-            hover.dockClickPassedThrough()
+            DispatchQueue.main.async { [weak self] in self?.hover.dismissAfterClick() }
             return .passThrough
         }
         let action = dockClickAction(for: snapshot.state)
         log("dock click \(item.title): windows=\(snapshot.windows.count) front=\(snapshot.isFrontmost) hidden=\(snapshot.isHidden) -> \(action)")
         switch action {
         case .passThrough:
-            hover.dockClickPassedThrough()
+            DispatchQueue.main.async { [weak self] in self?.hover.dismissAfterClick() }
             return .passThrough
         case .minimizeWindow:
             guard let window = snapshot.windows.first else { return .passThrough }
             return .intercept { [weak self] in
-                self?.hover.hide()
+                self?.hover.dismissAfterClick()
                 // 放到后台线程：窗口播放最小化动画期间，这一步可能迟迟不返回
                 DispatchQueue.global(qos: .userInteractive).async { window.element.set(kAXMinimizedAttribute, kCFBooleanTrue) }
             }
         case .restoreWindow:
             guard let window = snapshot.windows.first else { return .passThrough }
             return .intercept { [weak self] in
-                self?.hover.hide()
+                self?.hover.dismissAfterClick()
                 DispatchQueue.global(qos: .userInteractive).async { WindowIndex.focus(window, of: app) }
             }
         case .showWindowList:
@@ -115,6 +133,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         thumbnails.target = self
         thumbnails.state = defaults.bool(forKey: "thumbnails") ? .on : .off
         menu.addItem(thumbnails)
+        if defaults.bool(forKey: "thumbnails"), Thumbnailer.isAuthorized {
+            let peek = NSMenuItem(title: L("停在缩略图上时预览整个窗口"), action: #selector(togglePeek), keyEquivalent: "")
+            peek.target = self
+            peek.state = defaults.bool(forKey: "peek") ? .on : .off
+            peek.indentationLevel = 1
+            menu.addItem(peek)
+        }
         if defaults.bool(forKey: "thumbnails"), !Thumbnailer.isAuthorized {
             let grant = NSMenuItem(title: L("需要“录屏与系统录音”权限，点此打开系统设置"), action: #selector(openScreenRecordingSettings), keyEquivalent: "")
             grant.target = self
@@ -154,8 +179,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleEnabled() {
         let value = !defaults.bool(forKey: "enabled")
         defaults.set(value, forKey: "enabled")
-        hover.isEnabled = value
+        setEnabled(value)
         log("enabled=\(value)")
+    }
+
+    @objc private func togglePeek() {
+        let value = !defaults.bool(forKey: "peek")
+        defaults.set(value, forKey: "peek")
+        hover.wantsPeek = value
+        log("peek=\(value)")
     }
 
     @objc private func toggleThumbnails() {

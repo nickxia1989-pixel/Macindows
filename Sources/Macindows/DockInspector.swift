@@ -220,6 +220,18 @@ final class DockInspector {
         (list?.elements(kAXChildrenAttribute) ?? []).compactMap(makeItem)
     }
 
+    /// 在后台按应用包路径取程序坞的数字角标。同名应用可以安装在不同位置。
+    func applicationBadgeNumbers() -> [String: String] {
+        var result: [String: String] = [:]
+        for tile in list?.elements(kAXChildrenAttribute) ?? [] {
+            guard tile.string(kAXSubroleAttribute) == "AXApplicationDockItem",
+                  let count = WindowBadges.dockNumber(tile.string("AXStatusLabel")),
+                  let url = tile.url(kAXURLAttribute) else { continue }
+            result[url.standardizedFileURL.path] = count
+        }
+        return result
+    }
+
     private func makeItem(_ element: AXUIElement) -> DockItem? {
         guard element.string(kAXRoleAttribute) == "AXDockItem", let frame = element.frame else { return nil }
         return DockItem(element: element, frame: frame,

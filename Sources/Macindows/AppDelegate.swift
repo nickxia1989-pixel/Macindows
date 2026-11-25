@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let hover = HoverController()
     private let interceptor = ClickInterceptor()
+    private let switcher = WindowSwitcher()
     private var onboarding: OnboardingWindowController?
     private var trustTimer: Timer?
     private var healthTimer: Timer?
@@ -30,7 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Log.prepare()
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
         log("launch Macindows \(version) on macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
-        defaults.register(defaults: ["enabled": true, "thumbnails": false, "peek": true])
+        defaults.register(defaults: ["enabled": true, "thumbnails": false, "peek": true, "windowSwitcher": false])
         buildStatusItem()
 
         if Accessibility.promptIfNeeded() {
@@ -54,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         log("terminate")
         healthTimer?.invalidate()
+        switcher.stop()
         interceptor.stop()
         hover.stop()
         Log.flush()
@@ -63,17 +65,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !running else { return }
         running = true
         Accessibility.limitWaiting()
+        switcher.readApplicationBadges = { [dock = hover.dock] in dock.applicationBadgeNumbers() }
+        switcher.onBegin = { [weak self] in
+            self?.forgetToggle()
+            self?.hover.dismissAfterClick()
+        }
         setEnabled(defaults.bool(forKey: "enabled"))
         hover.wantsThumbnails = defaults.bool(forKey: "thumbnails")
         hover.wantsPeek = defaults.bool(forKey: "peek")
         hover.start()
 
         interceptor.decide = { [weak self] point in self?.decide(clickAt: point) ?? .passThrough }
-        interceptor.onMouseDown = { [weak self] point, isRightButton in self?.hover.mouseDown(at: point, opensMenu: isRightButton) }
+        interceptor.onMouseDown = { [weak self] point, isRightButton in
+            self?.switcher.mouseDown(at: point)
+            self?.hover.mouseDown(at: point, opensMenu: isRightButton)
+        }
         // 开了缩略图却还没有屏幕录制权限（例如刚换了新的应用标识）：让系统弹出授权请求
         if hover.wantsThumbnails, !Thumbnailer.isAuthorized { Thumbnailer.requestAccess() }
         let tapped = interceptor.start()
-        let health = Timer(timeInterval: 5, repeats: true) { [weak self] _ in self?.interceptor.reviveIfNeeded() }
+        let health = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
+            self?.interceptor.reviveIfNeeded()
+            self?.switcher.checkShortcut()
+        }
         RunLoop.main.add(health, forMode: .common)
         healthTimer = health
         log("services started, click interception \(tapped ? "on" : "FAILED"), hover notifications \(hover.dock.isListening ? "on" : "FAILED"), glass: \(DockGlass.diagnosis)")
@@ -82,6 +95,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func setEnabled(_ value: Bool) {
         hover.isEnabled = value
         enabled.withLock { $0 = value }
+        updateWindowSwitcher()
+    }
+
+    private func updateWindowSwitcher() {
+        if running, defaults.bool(forKey: "enabled"), defaults.bool(forKey: "windowSwitcher") {
+            switcher.start()
+        } else {
+            switcher.stop()
+        }
     }
 
     /// 鼠标左键在程序坞上按下时：按规则决定截不截这次点击。
@@ -203,7 +225,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         enabled.state = defaults.bool(forKey: "enabled") ? .on : .off
         menu.addItem(enabled)
 
-        let thumbnails = NSMenuItem(title: L("显示窗口缩略图"), action: #selector(toggleThumbnails), keyEquivalent: "")
+        let switchWindows = NSMenuItem(title: L("用 ⌘Tab 切换窗口"), action: #selector(toggleWindowSwitcher), keyEquivalent: "")
+        switchWindows.target = self
+        switchWindows.state = defaults.bool(forKey: "windowSwitcher") ? .on : .off
+        menu.addItem(switchWindows)
+
+        let thumbnails = NSMenuItem(title: L("显示程序坞窗口缩略图"), action: #selector(toggleThumbnails), keyEquivalent: "")
         thumbnails.target = self
         thumbnails.state = defaults.bool(forKey: "thumbnails") ? .on : .off
         menu.addItem(thumbnails)
@@ -214,7 +241,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             peek.indentationLevel = 1
             menu.addItem(peek)
         }
-        if defaults.bool(forKey: "thumbnails"), !Thumbnailer.isAuthorized {
+        if defaults.bool(forKey: "thumbnails") || defaults.bool(forKey: "windowSwitcher"), !Thumbnailer.isAuthorized {
             let grant = NSMenuItem(title: L("需要“录屏与系统录音”权限，点此打开系统设置"), action: #selector(openScreenRecordingSettings), keyEquivalent: "")
             grant.target = self
             grant.indentationLevel = 1
@@ -241,6 +268,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             hint.isEnabled = false
             menu.addItem(hint)
         }
+        if trusted, running, defaults.bool(forKey: "enabled"), defaults.bool(forKey: "windowSwitcher"), !switcher.isRunning {
+            menu.addItem(NSMenuItem(title: L("⌘Tab 未能启用，请关闭并重新打开窗口切换开关"), action: nil, keyEquivalent: ""))
+        }
 
         let logItem = NSMenuItem(title: L("在访达中显示日志"), action: #selector(revealLog), keyEquivalent: "")
         logItem.target = self
@@ -262,6 +292,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         defaults.set(value, forKey: "peek")
         hover.wantsPeek = value
         log("peek=\(value)")
+    }
+
+    @objc private func toggleWindowSwitcher() {
+        let value = !defaults.bool(forKey: "windowSwitcher")
+        defaults.set(value, forKey: "windowSwitcher")
+        updateWindowSwitcher()
+        if value, switcher.isRunning, !Thumbnailer.isAuthorized { Thumbnailer.requestAccess() }
     }
 
     @objc private func toggleThumbnails() {

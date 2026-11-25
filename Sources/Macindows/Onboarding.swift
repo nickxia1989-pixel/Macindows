@@ -20,7 +20,7 @@ final class OnboardingWindowController: NSWindowController {
         title.font = .systemFont(ofSize: 17, weight: .semibold)
 
         let body = NSTextField(wrappingLabelWithString: [
-            L("它用这项权限做四件事：知道鼠标停在程序坞的哪个图标上、列出各个 App 的窗口、切换到你选的窗口、在你点击程序坞图标时先看一眼。"),
+            L("Macindows 用这项权限识别程序坞图标和点击、列出窗口并切换到你选择的窗口。开启 ⌘Tab 窗口切换后，也用它识别切换快捷键。"),
             L("Macindows 不联网，不读取窗口里的内容。"),
         ].joined(separator: "\n\n"))
         body.font = .systemFont(ofSize: 13)

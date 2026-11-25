@@ -28,7 +28,7 @@
 
 The Dock is beautiful, just not very practical. Macindows fixes that and touches nothing else.
 
-- **Minimal change**: adds hover previews and click-to-switch. It never replaces or modifies the Dock.
+- **Minimal change**: adds hover previews, click-to-switch and an optional ⌘Tab window switcher. It never replaces or modifies the Dock.
 - **True to the original**: the Dock looks and works exactly as before. Quit Macindows and everything is back to stock.
 - **Nothing leaves your Mac**: it needs system permissions, but there is no network access, no analytics and no account.
 
@@ -59,16 +59,27 @@ Rest the pointer on any app icon in the Dock:
 
 Right-click menus and the Dock's other built-in interactions are still handled by the Dock itself. The panel gets out of the way when a Dock menu opens.
 
+### Switch windows with ⌘Tab
+
+Enable **Switch Windows with ⌘Tab** from the four-pane menu bar icon. It is off by default. Hold ⌘ and press Tab to see a centered grid on the display containing the pointer. Each window has its own proportionally sized thumbnail, title and app icon badge, including other windows of the same app and minimized windows. Cards grow or shrink to fit the screen. Additional pages appear only when the previews would otherwise become too small to recognize.
+
+- Visible, hidden and minimized windows share one most-recently-used order. Windows without an observed focus event start in newest-created order.
+- When an app has a numeric Dock badge, each of its window cards shows that number in a red badge at the top right. Counts refresh when you open the switcher.
+- Tap ⌘Tab to switch back. Keep holding ⌘ and press Tab or ⇧Tab to cycle forward or backward, across pages if needed.
+- Release ⌘ or click a card to focus that window. Minimized windows are restored automatically. Press Esc to cancel.
+- Thumbnails use Screen Recording permission. When a preview is unavailable, the title and app badge still work. Dock thumbnails have their own setting.
+- Turning the switcher off, pausing Macindows or quitting restores the system ⌘Tab shortcut immediately.
+
 ### Menu bar
 
-The four-pane icon in the menu bar lets you pause or enable Macindows, turn window thumbnails and the in-place preview on or off, launch at login, check permission status, reveal the log folder, and quit.
+The four-pane icon in the menu bar lets you pause or enable Macindows, toggle ⌘Tab window switching, Dock thumbnails and the in-place preview, launch at login, check permission status, reveal the log folder, and quit.
 
 ## Install
 
 1. Download `Macindows.dmg` from [Releases](https://github.com/nickxia1989-pixel/Macindows/releases/latest).
 2. Open it and drag Macindows into Applications.
 3. Launch Macindows and, when prompted, allow it under System Settings › Privacy & Security › Accessibility.
-4. For window thumbnails, turn on Show Window Thumbnails from the menu bar icon, allow Macindows under System Settings › Privacy & Security › Screen & System Audio Recording, then reopen it.
+4. For window thumbnails, turn on Show Dock Window Thumbnails from the menu bar icon, allow Macindows under System Settings › Privacy & Security › Screen & System Audio Recording, then reopen it.
 
 <p align="center">
   <img src="docs/images/install.png" width="560" alt="Open the disk image and drag Macindows into Applications">
@@ -84,15 +95,15 @@ The installer is signed with a Developer ID and notarized by Apple, so macOS ope
 
 | Permission | Required | What it is used for |
 | --- | --- | --- |
-| Accessibility | Yes | Knowing which Dock icon the pointer is on; listing, switching, minimizing and closing windows; recognizing clicks on Dock icons |
+| Accessibility | Yes | Knowing which Dock icon the pointer is on; listing, switching, minimizing and closing windows; recognizing clicks on Dock icons and the optional window-switching shortcut |
 | Screen Recording (listed as Screen & System Audio Recording in System Settings) | Optional | Window thumbnails, the in-place preview and the picture on the card for apps with no windows; also capturing the small patch of screen behind the Dock's name label, to cover the label |
 
 These permissions are broad, so here is exactly what Macindows does with them:
 
 - **No network access.** There are no network requests in the code: no analytics, no crash reporting, no update checks, no account.
 - **Captured images live in memory only.** They are only shown on screen, never written to disk, and never leave your Mac.
-- **Only two things are stored locally.** Three preferences (enabled, show thumbnails, in-place preview), and a troubleshooting log in `~/Library/Logs/Macindows/`. The log records app names and window counts, never window titles or images, and is trimmed once it passes roughly 512 KB.
-- **The keyboard is not monitored.** Pointer movement is tracked only while the hover panel is showing, and only left clicks that land on a Dock icon are acted on.
+- **Only two things are stored locally.** Four preferences (enabled, ⌘Tab window switching, Dock thumbnails, in-place preview), and a troubleshooting log in `~/Library/Logs/Macindows/`. The log records app names and window counts, never window titles or images, and is trimmed once it passes roughly 512 KB.
+- **Keyboard shortcut handling runs only while the window switcher is enabled.** It checks key codes and modifier flags for ⌘Tab, ⇧⌘Tab and cancellation. It does not read typed text or log keystrokes. Pointer movement is tracked only while the hover panel is visible. With the switcher open, clicking a card focuses its window and clicking outside dismisses the panel.
 - **You can verify all of this.** The full source is in this repository. Check each point above against the code, or build the app yourself.
 
 ## How It Works

@@ -27,13 +27,35 @@ enum Thumbnailer {
     /// 这些再直接向窗口服务器要画面——窗口服务器一直留着最小化窗口的画面。两种办法都拿不到的不会出现在结果里。
     /// fullResolution 为真时按窗口原本的大小截（给「原位预览」用），否则缩到 maxPixelSize 以内。
     static func capture(windowIDs: [CGWindowID], maxPixelSize: CGFloat = 560, fullResolution: Bool = false) async -> [CGWindowID: NSImage] {
-        guard isAuthorized, !windowIDs.isEmpty else { return [:] }
-        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false) else { return [:] }
+        guard !Task.isCancelled, isAuthorized, !windowIDs.isEmpty else { return [:] }
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false),
+              !Task.isCancelled else { return [:] }
+        return await capture(windowIDs: windowIDs, in: content, maxPixelSize: maxPixelSize, fullResolution: fullResolution)
+    }
+
+    /// 快速切换器的一页可能有几十扇窗口。只枚举一次屏幕内容，分批截图并交给面板显示。
+    static func capturePage(windowIDs: [CGWindowID], maxPixelSize: CGFloat,
+                            receive: @MainActor ([CGWindowID: NSImage]) -> Void) async {
+        guard !Task.isCancelled, !windowIDs.isEmpty, isAuthorized,
+              let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false) else { return }
+        let batchSize = 6
+        for start in stride(from: 0, to: windowIDs.count, by: batchSize) {
+            guard !Task.isCancelled else { return }
+            let batch = Array(windowIDs[start..<min(start + batchSize, windowIDs.count)])
+            let images = await capture(windowIDs: batch, in: content, maxPixelSize: maxPixelSize, fullResolution: false)
+            guard !Task.isCancelled else { return }
+            await receive(images)
+        }
+    }
+
+    private static func capture(windowIDs: [CGWindowID], in content: SCShareableContent,
+                                maxPixelSize: CGFloat, fullResolution: Bool) async -> [CGWindowID: NSImage] {
         let wanted = Set(windowIDs)
         var result: [CGWindowID: NSImage] = [:]
         await withTaskGroup(of: (CGWindowID, NSImage?).self) { group in
             for window in content.windows where wanted.contains(window.windowID) {
                 group.addTask {
+                    guard !Task.isCancelled else { return (window.windowID, nil) }
                     let size = window.frame.size
                     guard size.width > 1, size.height > 1 else { return (window.windowID, nil) }
                     let scale = (fullResolution ? 1 : min(1, maxPixelSize / max(size.width, size.height))) * 2
@@ -53,12 +75,15 @@ enum Thumbnailer {
                 if let image { result[id] = image }
             }
         }
+        guard !Task.isCancelled else { return [:] }
         let missing = windowIDs.filter { result[$0] == nil }
         if !missing.isEmpty {
             let recovered = await Task.detached(priority: .userInitiated) { () -> [CGWindowID: CGImage] in
                 var images: [CGWindowID: CGImage] = [:]
                 for id in missing {
-                    if let image = PrivateAPI.captureWindow(id, fullResolution: fullResolution) { images[id] = image }
+                    if let image = PrivateAPI.captureWindow(id, fullResolution: fullResolution) {
+                        images[id] = fullResolution ? image : thumbnail(image, longestSide: maxPixelSize * 2)
+                    }
                 }
                 return images
             }.value
@@ -68,5 +93,18 @@ enum Thumbnailer {
             log("thumbnails: \(result.count)/\(windowIDs.count) captured, \(recovered.count) of them from the window server")
         }
         return result
+    }
+
+    /// 窗口服务器返回的是原图。保留缩略图时先缩小，避免一页最小化窗口占用多张原图的内存。
+    private static func thumbnail(_ image: CGImage, longestSide: CGFloat) -> CGImage {
+        let scale = longestSide / CGFloat(max(image.width, image.height))
+        guard scale < 1,
+              let context = CGContext(data: nil, width: max(1, Int((CGFloat(image.width) * scale).rounded())),
+                                      height: max(1, Int((CGFloat(image.height) * scale).rounded())),
+                                      bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return image }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: context.width, height: context.height))
+        return context.makeImage() ?? image
     }
 }

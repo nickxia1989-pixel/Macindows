@@ -33,7 +33,9 @@
 /* Window switcher */
 "切换窗口" = "Switch Windows";
 "没有可切换的窗口" = "No windows to switch to";
-"Tab 下一个     ⇧Tab 上一个     松开 ⌘ 切换     Esc 取消" = "Tab Next     ⇧Tab Previous     Release ⌘ to switch     Esc Cancel";
-"松开 ⌘ 切换     Esc 取消" = "Release ⌘ to switch     Esc Cancel";
+"没有打开的窗口" = "No open windows";
+"无窗口应用" = "Apps without windows";
+"快捷键 %d" = "Shortcut %d";
+"应用" = "Application";
 "第 %d / %d 页" = "Page %d of %d";
 "应用角标 %@" = "App badge %@";

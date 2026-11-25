@@ -741,12 +741,6 @@ final class HoverController {
         guard case .empty(let item, let app)? = shown else { return }
         noteReopen(of: app)
         hide()
-        DispatchQueue.global(qos: .userInteractive).async {
-            let pressed = item.element.perform(kAXPressAction)
-            log("open window of \(item.title) via dock press=\(pressed)")
-            if !pressed, let url = app.bundleURL {
-                NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
-            }
-        }
+        DispatchQueue.global(qos: .userInteractive).async { WindowIndex.reopen(app, dockItem: item) }
     }
 }

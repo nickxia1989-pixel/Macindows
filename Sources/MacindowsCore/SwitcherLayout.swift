@@ -6,23 +6,32 @@ public struct SwitcherLayout {
     public static let pictureInset: CGFloat = 7
     public static let titleSpace: CGFloat = 30
     public static let defaultAspect: CGFloat = 1.6
+    public static let appCardSize = CGSize(width: 96, height: 64)
+    public static let appGap: CGFloat = 6
+    /// 底部应用栏的可滚动范围。图标不会占用窗口卡片的下标或页数。
+    public let applicationStrip: CGRect
 
     public let size: CGSize
     /// 每张卡片在所属页面中的位置，下标就是窗口下标。
     public let frames: [CGRect]
     public let pages: [Range<Int>]
 
-    public init(windowSizes: [CGSize?], screenSize: CGSize) {
-        guard !windowSizes.isEmpty else {
-            size = .zero
-            frames = []
-            pages = []
-            return
-        }
-        let gap: CGFloat = 8, top: CGFloat = 46, bottom: CGFloat = 38
+    public init(windowSizes: [CGSize?], screenSize: CGSize, applicationCount: Int = 0) {
+        let gap: CGFloat = 8, top: CGFloat = 46, bottom = Self.inset
+        let appHeight = Self.appCardSize.height + 8
+        let sectionHeight = applicationCount > 0 ? 34 + appHeight : 0
         // 在小屏幕上把空间留给窗口，只在屏幕外围留少量空白。
         let room = CGSize(width: max(1, floor(screenSize.width - min(64, screenSize.width * 0.06) - 2 * Self.inset)),
-                          height: max(1, floor(screenSize.height - min(64, screenSize.height * 0.06) - top - bottom)))
+                          height: max(1, floor(screenSize.height - min(64, screenSize.height * 0.06) - top - bottom - sectionHeight)))
+        let appWidth = CGFloat(min(9, applicationCount)) * (Self.appCardSize.width + Self.appGap) - Self.appGap
+        let minWidth = min(room.width, max(236, appWidth))
+        guard !windowSizes.isEmpty else {
+            frames = []
+            pages = []
+            applicationStrip = applicationCount > 0 ? CGRect(x: Self.inset, y: top, width: minWidth, height: appHeight) : .zero
+            size = applicationCount > 0 ? CGSize(width: minWidth + 2 * Self.inset, height: top + appHeight + bottom) : .zero
+            return
+        }
         let chrome = 2 * Self.pictureInset + Self.titleSpace
         let aspects = windowSizes.map(Self.aspect(of:))
 
@@ -62,8 +71,10 @@ public struct SwitcherLayout {
         let packedRows = rows(at: CGFloat(low))
         let rowStride = CGFloat(low) + chrome + gap
         let rowsPerPage = min(packedRows.count, max(1, Int((room.height + gap) / rowStride)))
-        let gridWidth = min(room.width, max(236, packedRows.compactMap { $0.last?.maxX }.max() ?? 0))
-        size = CGSize(width: gridWidth + 2 * Self.inset, height: top + CGFloat(rowsPerPage) * rowStride - gap + bottom)
+        let gridWidth = min(room.width, max(minWidth, packedRows.compactMap { $0.last?.maxX }.max() ?? 0))
+        let gridBottom = top + CGFloat(rowsPerPage) * rowStride - gap
+        size = CGSize(width: gridWidth + 2 * Self.inset, height: gridBottom + sectionHeight + bottom)
+        applicationStrip = applicationCount > 0 ? CGRect(x: Self.inset, y: gridBottom + 34, width: gridWidth, height: appHeight) : .zero
 
         var frames: [CGRect] = []
         var pages: [Range<Int>] = []

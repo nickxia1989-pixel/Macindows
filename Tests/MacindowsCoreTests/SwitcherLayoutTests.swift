@@ -7,6 +7,21 @@ final class SwitcherLayoutTests: XCTestCase {
     private let portrait = CGSize(width: 500, height: 900)
     private let square = CGSize(width: 800, height: 800)
 
+    func testAppRowStaysBelowEveryWindowPageAndFitsTheScreen() {
+        let sizes = Array<CGSize?>(repeating: landscape, count: 95)
+        let screen = CGSize(width: 900, height: 600)
+        let layout = SwitcherLayout(windowSizes: sizes, screenSize: screen, applicationCount: 22)
+        XCTAssertEqual(layout.pages.flatMap { $0 }, Array(sizes.indices))
+        XCTAssertTrue(layout.frames.allSatisfy { $0.maxY < layout.applicationStrip.minY })
+        XCTAssertTrue(CGRect(origin: .zero, size: layout.size).contains(layout.applicationStrip))
+        XCTAssertTrue(CGRect(origin: .zero, size: screen).contains(CGRect(origin: .zero, size: layout.size)))
+        let apps = SwitcherLayout(windowSizes: [], screenSize: laptop, applicationCount: 12)
+        XCTAssertTrue(apps.pages.isEmpty)
+        XCTAssertTrue(apps.frames.isEmpty)
+        XCTAssertGreaterThanOrEqual(apps.applicationStrip.width, 9 * SwitcherLayout.appCardSize.width + 8 * SwitcherLayout.appGap)
+        XCTAssertTrue(SwitcherLayout(windowSizes: sizes, screenSize: screen).applicationStrip.isEmpty)
+    }
+
     func testFitsBeyondEightAndShrinksAsWindowsAccumulate() {
         func layout(_ count: Int) -> SwitcherLayout {
             SwitcherLayout(windowSizes: Array(repeating: landscape, count: count), screenSize: laptop)

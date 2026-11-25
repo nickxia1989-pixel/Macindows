@@ -5,6 +5,7 @@ import Carbon.HIToolbox
 final class SwitcherShortcut {
     enum Action {
         case step(backwards: Bool), commit, cancel
+        case applications, windows, openApplication(Int)
     }
 
     var onAction: ((_ gesture: Int, _ action: Action) -> Void)?
@@ -13,6 +14,7 @@ final class SwitcherShortcut {
     private let lock = NSLock()
     private var serial = 0
     private var tracking: Int?
+    private var visibleApplicationCount: Int?
     private var swallowed = Set<Int>()
 
     func start() -> Bool {
@@ -53,6 +55,17 @@ final class SwitcherShortcut {
         lock.withLock { if tracking == gesture { tracking = nil } }
     }
 
+    func panelDidShow(for gesture: Int, applicationCount: Int) {
+        lock.withLock { if tracking == gesture { visibleApplicationCount = applicationCount } }
+    }
+
+    private static let digits: [Int: Int] = [
+        kVK_ANSI_1: 1, kVK_ANSI_2: 2, kVK_ANSI_3: 3, kVK_ANSI_4: 4, kVK_ANSI_5: 5,
+        kVK_ANSI_6: 6, kVK_ANSI_7: 7, kVK_ANSI_8: 8, kVK_ANSI_9: 9,
+        kVK_ANSI_Keypad1: 1, kVK_ANSI_Keypad2: 2, kVK_ANSI_Keypad3: 3, kVK_ANSI_Keypad4: 4,
+        kVK_ANSI_Keypad5: 5, kVK_ANSI_Keypad6: 6, kVK_ANSI_Keypad7: 7, kVK_ANSI_Keypad8: 8, kVK_ANSI_Keypad9: 9
+    ]
+
     func reviveIfNeeded() {
         if let tap, !CGEvent.tapIsEnabled(tap: tap) { CGEvent.tapEnable(tap: tap, enable: true) }
     }
@@ -87,13 +100,33 @@ final class SwitcherShortcut {
         let otherModifiers: CGEventFlags = [.maskAlternate, .maskControl, .maskSecondaryFn]
         if key == kVK_Tab, flags.contains(.maskCommand), flags.intersection(otherModifiers).isEmpty,
            !repeating || tracking != nil {
-            if tracking == nil { serial += 1 }
+            if tracking == nil {
+                serial += 1
+                visibleApplicationCount = nil
+            }
             tracking = serial
             swallowed.insert(key)
             send(.step(backwards: flags.contains(.maskShift)), for: serial)
             return true
         }
         if repeating, swallowed.contains(key) { return true }
+        if let tracking, let visibleApplicationCount, flags.contains(.maskCommand),
+           flags.intersection([.maskControl, .maskAlternate, .maskShift]).isEmpty {
+            if let number = Self.digits[key], !flags.contains(.maskSecondaryFn) {
+                swallowed.insert(key)
+                if number <= visibleApplicationCount {
+                    self.tracking = nil
+                    send(.openApplication(number - 1), for: tracking)
+                }
+                return true
+            }
+            // 部分键盘给方向键附加 Fn 标志。
+            if visibleApplicationCount > 0, key == kVK_DownArrow || key == kVK_UpArrow {
+                swallowed.insert(key)
+                send(key == kVK_DownArrow ? .applications : .windows, for: tracking)
+                return true
+            }
+        }
         if let tracking {
             self.tracking = nil
             send(.cancel, for: tracking)

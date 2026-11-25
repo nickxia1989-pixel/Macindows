@@ -96,6 +96,11 @@ enum Thumbnailer {
     }
 
     /// 窗口服务器返回的是原图。保留缩略图时先缩小，避免一页最小化窗口占用多张原图的内存。
+    static func windowServerThumbnail(_ id: CGWindowID, longestSide: CGFloat) -> CGImage? {
+        guard isAuthorized, let image = PrivateAPI.captureWindow(id) else { return nil }
+        return thumbnail(image, longestSide: longestSide)
+    }
+
     private static func thumbnail(_ image: CGImage, longestSide: CGFloat) -> CGImage {
         let scale = longestSide / CGFloat(max(image.width, image.height))
         guard scale < 1,

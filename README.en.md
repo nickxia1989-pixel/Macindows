@@ -63,11 +63,13 @@ Right-click menus and the Dock's other built-in interactions are still handled b
 
 Enable **Switch Windows with ⌘Tab** from the four-pane menu bar icon. It is off by default. Hold ⌘ and press Tab to see a centered grid on the display containing the pointer. Each window has its own proportionally sized thumbnail, title and app icon badge, including other windows of the same app and minimized windows. Cards grow or shrink to fit the screen. Additional pages appear only when the previews would otherwise become too small to recognize.
 
+- After you close an app’s last window, it appears in **Apps without windows** at the bottom. While the switcher is visible, press the number shown on an app (**1–9**, number row or keypad) to open it immediately.
+- Hold ⌘ and press ↓ to enter the app row. Use Tab or ⇧Tab to select an app and release ⌘ to open it. Press ↑ to return to the previously selected window. You can also click any app, including those beyond the first nine.
 - Visible, hidden and minimized windows share one most-recently-used order. Windows without an observed focus event start in newest-created order.
 - When an app has a numeric Dock badge, each of its window cards shows that number in a red badge at the top right. Counts refresh when you open the switcher.
 - Tap ⌘Tab to switch back. Keep holding ⌘ and press Tab or ⇧Tab to cycle forward or backward, across pages if needed.
 - Release ⌘ or click a card to focus that window. Minimized windows are restored automatically. Press Esc to cancel.
-- Thumbnails use Screen Recording permission. When a preview is unavailable, the title and app badge still work. Dock thumbnails have their own setting.
+- Window previews are prepared ahead of time and cached in memory. Reopening the switcher shows cached previews immediately and refreshes their contents. When Screen Recording permission or a preview is unavailable, you can still switch using the app icon and window title. Dock thumbnails have their own setting.
 - Turning the switcher off, pausing Macindows or quitting restores the system ⌘Tab shortcut immediately.
 
 ### Menu bar

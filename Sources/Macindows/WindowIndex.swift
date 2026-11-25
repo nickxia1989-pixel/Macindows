@@ -158,12 +158,33 @@ enum WindowIndex {
         window.element.set(kAXMainAttribute, kCFBooleanTrue)
         if !precise {
             // 退路：公开接口。会把这个 App 的所有窗口一起带到前面。
-            DispatchQueue.main.async {
-                NSApp.yieldActivation(to: app)
-                app.activate(from: .current, options: [])
-            }
+            activate(app)
         }
         log("focus \(app.localizedName ?? "?") window=\(window.id.map(String.init) ?? "-") precise=\(precise) currentSpace=\(window.isOnCurrentSpace)")
+    }
+
+    static func activate(_ app: NSRunningApplication) {
+        DispatchQueue.main.async {
+            guard !app.isTerminated else { return }
+            NSApp.yieldActivation(to: app)
+            app.activate(from: .current, options: [])
+        }
+    }
+
+    /// 应用自己决定重新打开时要显示什么，例如文稿、新建窗口或文件选择器。
+    static func reopen(_ app: NSRunningApplication, dockItem: DockItem? = nil) {
+        guard !app.isTerminated else { return }
+        if let dockItem {
+            let pressed = dockItem.element.perform(kAXPressAction)
+            log("open window of \(dockItem.title) via dock press=\(pressed)")
+            if pressed { return }
+        }
+        guard let url = app.bundleURL else { activate(app); return }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.allowsRunningApplicationSubstitution = false
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, error in
+            if error != nil { activate(app) }
+        }
     }
 
     /// 同样要放到 actions 上执行：App 弹出「是否保存」之类的对话框时，这一步也可能迟迟不返回

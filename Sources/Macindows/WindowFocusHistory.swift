@@ -2,6 +2,7 @@ import AppKit
 
 /// 窗口号不可用时，仍可用辅助功能元素识别同一扇窗口。
 enum SwitcherWindowKey: Hashable {
+    case application(pid_t)
     case numbered(pid_t, CGWindowID)
     case element(AXUIElement)
 
@@ -12,6 +13,7 @@ enum SwitcherWindowKey: Hashable {
 
 /// 只订阅前台应用的焦点变化。向应用读取焦点和安装 AX 通知都在后台，使用记录仅存在内存里。
 final class WindowFocusHistory {
+    var onFocus: ((SwitcherWindowKey) -> Void)?
     private let queue = DispatchQueue(label: "macindows.switcher-focus", qos: .userInitiated)
     private var activation: NSObjectProtocol?
     private var observer: AXObserver?
@@ -44,6 +46,8 @@ final class WindowFocusHistory {
         guard let app, app.activationPolicy == .regular else { return }
         let pid = app.processIdentifier
         self.pid = pid
+        // 关掉最后一扇窗口后，应用卡片沿用这次激活的顺序。
+        note(.application(pid))
         queue.async { [weak self] in
             guard let self else { return }
             let application = AXUIElementCreateApplication(pid)
@@ -97,6 +101,7 @@ final class WindowFocusHistory {
         guard recent.first != key else { return }
         recent.removeAll { $0 == key }
         recent.insert(key, at: 0)
+        onFocus?(key)
         // 长时间开着切换器却没有再次呼出时，也不会一直保留已关闭窗口的引用。
         if recent.count > 4096 { recent.removeLast() }
     }

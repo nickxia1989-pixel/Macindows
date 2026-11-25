@@ -3,10 +3,16 @@ import MacindowsCore
 
 struct SwitcherEntry {
     let app: NSRunningApplication
-    let window: AppWindow
+    /// nil 代表已确认没有可切换窗口、但仍在运行的应用。
+    let window: AppWindow?
+
+    var title: String {
+        window?.title ?? app.localizedName ?? app.bundleURL?.deletingPathExtension().lastPathComponent ?? L("应用")
+    }
 
     var key: SwitcherWindowKey {
-        SwitcherWindowKey(pid: app.processIdentifier, element: window.element, id: window.id)
+        guard let window else { return .application(app.processIdentifier) }
+        return SwitcherWindowKey(pid: app.processIdentifier, element: window.element, id: window.id)
     }
 }
 
@@ -15,14 +21,15 @@ private final class FlippedView: NSView {
 }
 
 private final class NumberBadge: NSView {
-    private static let height: CGFloat = 30
+    private let height: CGFloat
     private let label = NSTextField(labelWithString: "")
     private(set) var number: String?
 
-    init() {
+    init(compact: Bool) {
+        height = compact ? 21 : 30
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = Self.height / 2
+        layer?.cornerRadius = height / 2
         layer?.backgroundColor = NSColor(srgbRed: 0.82, green: 0.075, blue: 0.15, alpha: 1).cgColor
         layer?.borderWidth = 1.5
         layer?.borderColor = NSColor.white.cgColor
@@ -30,7 +37,7 @@ private final class NumberBadge: NSView {
         layer?.shadowOpacity = 0.28
         layer?.shadowRadius = 2
         layer?.shadowOffset = .zero
-        label.font = .monospacedDigitSystemFont(ofSize: 17, weight: .bold)
+        label.font = .monospacedDigitSystemFont(ofSize: compact ? 12 : 17, weight: .bold)
         label.lineBreakMode = .byTruncatingTail
         label.alignment = .center
         label.textColor = .white
@@ -47,9 +54,9 @@ private final class NumberBadge: NSView {
         guard let value else { return }
         label.stringValue = value
         let textSize = label.intrinsicContentSize
-        let width = min(maxWidth, max(Self.height, ceil(textSize.width) + 12))
-        setFrameSize(NSSize(width: width, height: Self.height))
-        label.frame = NSRect(x: 4, y: round((Self.height - textSize.height) / 2),
+        let width = min(maxWidth, max(height, ceil(textSize.width) + 12))
+        setFrameSize(NSSize(width: width, height: height))
+        label.frame = NSRect(x: 4, y: round((height - textSize.height) / 2),
                              width: max(0, width - 8), height: textSize.height)
     }
 }
@@ -60,15 +67,20 @@ private final class SwitcherCard: NSView {
     private let fallback = NSImageView()
     private let badge = NSImageView()
     private let title: NSTextField
-    private let appCount = NumberBadge()
+    private let appCount: NumberBadge
+    private let isApplication: Bool
     private let name: String
     let appPath: String?
     var onPick: (() -> Void)?
 
-    init(_ entry: SwitcherEntry, frame: NSRect) {
+    init(_ entry: SwitcherEntry, frame: NSRect, applicationIndex: Int? = nil) {
+        isApplication = applicationIndex != nil
+        appCount = NumberBadge(compact: isApplication)
         appPath = entry.app.bundleURL?.standardizedFileURL.path
-        name = [entry.window.title, entry.app.localizedName].compactMap { $0 }.joined(separator: " · ")
-        title = NSTextField(labelWithString: entry.window.title)
+        let detail = isApplication ? L("没有打开的窗口") : entry.app.localizedName
+        let number = applicationIndex.flatMap { $0 < 9 ? $0 + 1 : nil }
+        name = [entry.title, detail, number.map { String(format: L("快捷键 %d"), $0) }].compactMap { $0 }.joined(separator: " · ")
+        title = NSTextField(labelWithString: entry.title)
         super.init(frame: frame)
         wantsLayer = true
         layer?.cornerRadius = 13
@@ -80,8 +92,7 @@ private final class SwitcherCard: NSView {
         preview.layer?.masksToBounds = true
         addSubview(preview)
 
-        fallback.image = NSImage(systemSymbolName: "macwindow", accessibilityDescription: nil)
-        fallback.contentTintColor = .tertiaryLabelColor
+        fallback.image = entry.app.icon ?? NSImage(systemSymbolName: "macwindow", accessibilityDescription: nil)
         fallback.imageScaling = .scaleProportionallyUpOrDown
         addSubview(fallback)
         badge.image = entry.app.icon ?? NSImage(systemSymbolName: "app", accessibilityDescription: nil)
@@ -102,7 +113,28 @@ private final class SwitcherCard: NSView {
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         updateDescription()
-        positionPicture(size: entry.window.frame?.size)
+        if isApplication {
+            preview.isHidden = true
+            fallback.isHidden = true
+            badge.frame = NSRect(x: round(bounds.midX - 17), y: 6, width: 34, height: 34)
+            title.font = .systemFont(ofSize: 11, weight: .medium)
+            title.alignment = .center
+            title.frame = NSRect(x: 4, y: 43, width: bounds.width - 8, height: 16)
+            if let number {
+                let key = NSTextField(labelWithString: String(number))
+                key.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+                key.alignment = .center
+                key.wantsLayer = true
+                key.layer?.cornerRadius = 4
+                key.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.10).cgColor
+                key.frame = NSRect(x: 5, y: 5, width: 18, height: 17)
+                key.setAccessibilityElement(false)
+                addSubview(key)
+            }
+        } else {
+            badge.isHidden = true
+            positionPicture(size: entry.window?.frame?.size)
+        }
         setSelected(false)
     }
 
@@ -112,12 +144,13 @@ private final class SwitcherCard: NSView {
         positionPicture(size: image.size)
         preview.image = image
         fallback.isHidden = true
+        badge.isHidden = false
     }
 
     private func positionPicture(size: CGSize?) {
         let picture = SwitcherLayout.pictureFrame(for: size, in: bounds)
         preview.frame = picture
-        let symbolSide = min(38, picture.width, picture.height)
+        let symbolSide = min(72, round(min(picture.width, picture.height) * 0.52))
         fallback.frame = NSRect(x: picture.midX - symbolSide / 2, y: picture.midY - symbolSide / 2,
                                 width: symbolSide, height: symbolSide)
         let badgeSide = min(38, max(20, round(picture.height * 0.23)), bounds.width - 6)
@@ -127,8 +160,8 @@ private final class SwitcherCard: NSView {
 
     func setAppCount(_ number: String?) {
         guard number != appCount.number else { return }
-        let inset = SwitcherLayout.pictureInset
-        appCount.setNumber(number, maxWidth: bounds.width - 2 * inset)
+        let inset: CGFloat = isApplication ? 4 : SwitcherLayout.pictureInset
+        appCount.setNumber(number, maxWidth: bounds.width - 2 * inset - (isApplication ? 22 : 0))
         appCount.setFrameOrigin(NSPoint(x: bounds.maxX - inset - appCount.frame.width, y: inset))
         updateDescription()
     }
@@ -155,20 +188,27 @@ private final class SwitcherCard: NSView {
     override func accessibilityPerformPress() -> Bool { onPick?(); return true }
 }
 
-/// 每次只摆当前一页的卡片。翻页时才取新缩略图，翻页、取消或重新呼出都不会串图。
+/// 用同一页的预览一起展示卡片，后续截图更新原来的图像视图。
 final class SwitcherPanel: NSPanel {
-    var onPick: ((Int) -> Void)?
+    var onPick: ((SwitcherChoice) -> Void)?
+    var onReveal: (() -> Void)?
+    private let previews = SwitcherPreviews()
+    private let glass = NSGlassEffectView()
     private let canvas = FlippedView()
     private let heading = NSTextField(labelWithString: L("切换窗口"))
-    private let counter = NSTextField(labelWithString: "")
-    private let hint = NSTextField(labelWithString: L("Tab 下一个     ⇧Tab 上一个     松开 ⌘ 切换     Esc 取消"))
     private let pageNumber = NSTextField(labelWithString: "")
+    private let appHeading = NSTextField(labelWithString: L("无窗口应用"))
+    private let appScroll = NSScrollView()
+    private let appRow = FlippedView()
+    private var appCards: [SwitcherCard] = []
     private var layout: SwitcherLayout?
     private var visibleFrame: NSRect = .zero
     private var cards: [SwitcherCard] = []
     private weak var highlighted: SwitcherCard?
     private var page: Range<Int> = 0..<0
-    private var capture: Task<Void, Never>?
+    private var appBadges: [String: String] = [:]
+    private var isDismissing = false
+    private var transitionGeneration = 0
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
@@ -183,106 +223,222 @@ final class SwitcherPanel: NSPanel {
         backgroundColor = .clear
         hasShadow = true
         animationBehavior = .none
-        let glass = NSGlassEffectView()
+        // 让玻璃和卡片一起缩放，窗口本身始终使用最终布局和点击区域。
+        let root = NSView()
+        root.wantsLayer = true
+        glass.wantsLayer = true
+        glass.autoresizingMask = [.width, .height]
         glass.style = .regular
         glass.cornerRadius = 24
         glass.contentView = canvas
-        contentView = glass
+        root.addSubview(glass)
+        contentView = root
         heading.font = .systemFont(ofSize: 16, weight: .semibold)
-        counter.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
-        counter.textColor = .secondaryLabelColor
-        counter.alignment = .right
-        hint.font = .systemFont(ofSize: 12)
-        hint.textColor = .secondaryLabelColor
-        pageNumber.font = counter.font
+        pageNumber.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         pageNumber.textColor = .secondaryLabelColor
-        pageNumber.alignment = .right
-        for label in [heading, counter, hint, pageNumber] { canvas.addSubview(label) }
+        appHeading.font = .systemFont(ofSize: 13, weight: .semibold)
+        appScroll.drawsBackground = false
+        appScroll.hasHorizontalScroller = true
+        appScroll.autohidesScrollers = true
+        appScroll.scrollerStyle = .overlay
+        appScroll.documentView = appRow
+        for view in [heading, pageNumber, appHeading, appScroll] { canvas.addSubview(view) }
         setAccessibilityTitle(L("切换窗口"))
+        previews.warm()
     }
 
-    func present(_ entries: [SwitcherEntry], selected: Int, on screen: NSScreen, appBadges: [String: String] = [:]) {
+    func warmPreview(pid: pid_t, id: CGWindowID) { previews.warm(.init(pid: pid, id: id)) }
+    func stopPreviews() { previews.stop() }
+
+    func present(windows: [SwitcherEntry], applications: [SwitcherEntry], selected: SwitcherChoice,
+                 windowIndex: Int?, on screen: NSScreen, appBadges: [String: String]) {
         let visible = screen.visibleFrame
+        let geometry = (visible == visibleFrame ? layout : nil)
+            ?? SwitcherLayout(windowSizes: windows.map { $0.window?.frame?.size }, screenSize: visible.size, applicationCount: applications.count)
+        let pageIndex = windowIndex.flatMap { i in geometry.pages.firstIndex { $0.contains(i) } }
+        let range = pageIndex.map { geometry.pages[$0] } ?? 0..<0
+        let keys = windows[range].compactMap { entry in
+            entry.window?.id.map { SwitcherPreviews.Window(pid: entry.app.processIdentifier, id: $0) }
+        }
+        let longestSide = geometry.frames[range].reduce(CGFloat(0)) { max($0, $1.width, $1.height) }
+        self.appBadges = appBadges
+        previews.present(keys, maxSize: longestSide) { [weak self] images in
+            self?.drawPage(windows: windows, applications: applications, selected: selected, visible: visible,
+                           geometry: geometry, pageIndex: pageIndex, range: range, images: images)
+        } refresh: { [weak self] images in
+            guard let self, self.page == range else { return }
+            for (slot, i) in range.enumerated() {
+                if let id = windows[i].window?.id, let image = images[id] { self.cards[slot].setImage(image) }
+            }
+        }
+    }
+
+    private func drawPage(windows: [SwitcherEntry], applications: [SwitcherEntry], selected: SwitcherChoice,
+                          visible: CGRect, geometry: SwitcherLayout, pageIndex: Int?, range: Range<Int>, images: SwitcherPreviews.Images) {
         if layout == nil || visible != visibleFrame {
             clearPage()
-            layout = SwitcherLayout(windowSizes: entries.map { $0.window.frame?.size }, screenSize: visible.size)
+            layout = geometry
             visibleFrame = visible
-        }
-        guard let layout, let pageIndex = layout.pages.firstIndex(where: { $0.contains(selected) }) else { return }
-        let range = layout.pages[pageIndex]
-        if range != page {
-            clearPage()
-            page = range
-            let size = layout.size
+            let size = geometry.size
             let frame = NSRect(x: round(visible.midX - size.width / 2), y: round(visible.midY - size.height / 2),
                                width: size.width, height: size.height)
             setFrame(frame, display: false)
             let edge = SwitcherLayout.inset + 4
-            heading.frame = NSRect(x: edge, y: 14, width: size.width - 112, height: 22)
-            counter.frame = NSRect(x: size.width - 100, y: 16, width: 80, height: 18)
-            pageNumber.stringValue = layout.pages.count > 1
-                ? String(format: L("第 %d / %d 页"), pageIndex + 1, layout.pages.count) : ""
+            heading.stringValue = windows.isEmpty ? L("无窗口应用") : L("切换窗口")
+            heading.sizeToFit()
+            heading.setFrameOrigin(NSPoint(x: edge, y: 14))
+            configureApplicationStrip(applications, frame: geometry.applicationStrip, hasWindows: !windows.isEmpty)
+            updateApplicationBadges(appBadges)
+        }
+        if let pageIndex, geometry.pages.count > 1 {
+            pageNumber.stringValue = String(format: L("第 %d / %d 页"), pageIndex + 1, geometry.pages.count)
             pageNumber.sizeToFit()
-            pageNumber.setFrameOrigin(NSPoint(x: size.width - edge - pageNumber.frame.width, y: size.height - 27))
-            let hintWidth = size.width - 2 * edge - (pageNumber.stringValue.isEmpty ? 0 : pageNumber.frame.width + 12)
-            hint.frame = NSRect(x: edge, y: size.height - 27, width: hintWidth, height: 17)
-            hint.stringValue = L("Tab 下一个     ⇧Tab 上一个     松开 ⌘ 切换     Esc 取消")
-            if hint.intrinsicContentSize.width > hintWidth { hint.stringValue = L("松开 ⌘ 切换     Esc 取消") }
+            pageNumber.setFrameOrigin(NSPoint(x: heading.frame.maxX + 8, y: round(heading.frame.midY - pageNumber.frame.height / 2)))
+            pageNumber.isHidden = false
+        } else { pageNumber.isHidden = true }
+        if range != page {
+            clearPage()
+            page = range
             for i in range {
-                let card = SwitcherCard(entries[i], frame: layout.frames[i])
-                card.onPick = { [weak self] in self?.onPick?(i) }
+                let card = SwitcherCard(windows[i], frame: geometry.frames[i])
+                if let id = windows[i].window?.id, let image = images[id] { card.setImage(image) }
+                card.onPick = { [weak self] in self?.onPick?(.window(i)) }
                 canvas.addSubview(card)
                 cards.append(card)
             }
             updateApplicationBadges(appBadges)
-            let ids = range.compactMap { entries[$0].window.id }
-            let longestSide = layout.frames[range].reduce(CGFloat(0)) { max($0, $1.width, $1.height) }
-            capture = Task { @MainActor [weak self] in
-                await Thumbnailer.capturePage(windowIDs: ids, maxPixelSize: longestSide) { images in
-                    guard !Task.isCancelled, let self else { return }
-                    for (slot, i) in range.enumerated() {
-                        if let id = entries[i].window.id, let image = images[id] { self.cards[slot].setImage(image) }
-                    }
-                }
-            }
         }
-        counter.stringValue = "\(selected + 1) / \(entries.count)"
-        let chosen = cards[selected - range.lowerBound]
+        let chosen: SwitcherCard
+        switch selected {
+        case .window(let i):
+            chosen = cards[i - range.lowerBound]
+        case .application(let i):
+            chosen = appCards[i]
+            chosen.scrollToVisible(chosen.bounds)
+        }
         if highlighted !== chosen {
             highlighted?.setSelected(false)
             chosen.setSelected(true)
             highlighted = chosen
         }
-        if !isVisible { orderFrontRegardless() }
+        reveal()
+    }
+
+    private func configureApplicationStrip(_ apps: [SwitcherEntry], frame: CGRect, hasWindows: Bool) {
+        for card in appCards { card.removeFromSuperview() }
+        appCards.removeAll()
+        appScroll.isHidden = apps.isEmpty
+        appHeading.isHidden = apps.isEmpty || !hasWindows
+        guard !apps.isEmpty else { return }
+        appScroll.frame = frame
+        let headingWidth = ceil(appHeading.intrinsicContentSize.width)
+        appHeading.frame = CGRect(x: frame.minX + 4, y: frame.minY - 24, width: headingWidth, height: 18)
+        let size = SwitcherLayout.appCardSize, stride = size.width + SwitcherLayout.appGap
+        appRow.frame = CGRect(x: 0, y: 0, width: max(frame.width, CGFloat(apps.count) * stride - SwitcherLayout.appGap), height: frame.height)
+        for (i, app) in apps.enumerated() {
+            let card = SwitcherCard(app, frame: CGRect(origin: CGPoint(x: CGFloat(i) * stride, y: 0), size: size), applicationIndex: i)
+            card.onPick = { [weak self] in self?.onPick?(.application(i)) }
+            appRow.addSubview(card)
+            appCards.append(card)
+        }
+        appRow.scroll(.zero)
     }
 
     func updateApplicationBadges(_ counts: [String: String]) {
-        for card in cards { card.setAppCount(card.appPath.flatMap { counts[$0] }) }
+        appBadges = counts
+        for card in cards + appCards { card.setAppCount(card.appPath.flatMap { counts[$0] }) }
     }
 
     func showEmpty(on screen: NSScreen) {
+        previews.endPage()
         let visible = screen.visibleFrame
-        setFrame(NSRect(x: visible.midX - 140, y: visible.midY - 39, width: 280, height: 78), display: false)
-        heading.frame = NSRect(x: 20, y: 16, width: 240, height: 22)
-        counter.frame = .zero
-        pageNumber.stringValue = ""
-        hint.frame = NSRect(x: 20, y: 45, width: 240, height: 18)
-        hint.stringValue = L("没有可切换的窗口")
-        if !isVisible { orderFrontRegardless() }
+        clearPage()
+        heading.stringValue = L("没有可切换的窗口")
+        configureApplicationStrip([], frame: .zero, hasWindows: false)
+        heading.sizeToFit()
+        let size = NSSize(width: heading.frame.width + 48, height: heading.frame.height + 32)
+        setFrame(NSRect(x: round(visible.midX - size.width / 2), y: round(visible.midY - size.height / 2),
+                        width: size.width, height: size.height), display: false)
+        heading.setFrameOrigin(NSPoint(x: 24, y: 16))
+        pageNumber.isHidden = true
+        reveal()
     }
 
     private func clearPage() {
-        capture?.cancel()
-        capture = nil
         highlighted = nil
         for card in cards { card.removeFromSuperview() }
         cards.removeAll()
         page = 0..<0
     }
 
-    func dismiss() {
+    private func reveal() {
+        let fromHidden = !isVisible
+        guard fromHidden || isDismissing else { return }
+        isDismissing = false
+        ignoresMouseEvents = false
+        canvas.setAccessibilityHidden(false)
+        if fromHidden {
+            alphaValue = 0
+            orderFrontRegardless()
+        }
+        transition(showing: true, fromHidden: fromHidden)
+        onReveal?()
+    }
+
+    func dismiss(animated: Bool = true) {
+        previews.endPage()
+        guard animated, isVisible else { finishDismissal(); return }
+        guard !isDismissing else { return }
+        isDismissing = true
+        ignoresMouseEvents = true
+        canvas.setAccessibilityHidden(true)
+        // 留住画面淡出。连按 ⌘Tab 时下一次手势可以立即用新快照重建。
+        layout = nil
+        transition(showing: false)
+    }
+
+    private func transition(showing: Bool, fromHidden: Bool = false) {
+        transitionGeneration += 1
+        let generation = transitionGeneration
+        let duration = showing ? 0.13 : 0.09
+        let curve = CAMediaTimingFunction(name: showing ? .easeOut : .easeIn)
+        if let layer = glass.layer {
+            let current = layer.presentation()?.transform ?? CATransform3DIdentity
+            layer.removeAnimation(forKey: "switcherScale")
+            if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                // AppKit 可以把图层的锚点设在角上；以玻璃中心为缩放原点。
+                func scaled(_ factor: CGFloat) -> CATransform3D {
+                    let dx = layer.bounds.width * (0.5 - layer.anchorPoint.x) * (1 - factor)
+                    let dy = layer.bounds.height * (0.5 - layer.anchorPoint.y) * (1 - factor)
+                    return CATransform3DMakeAffineTransform(CGAffineTransform(a: factor, b: 0, c: 0, d: factor, tx: dx, ty: dy))
+                }
+                let scale = CABasicAnimation(keyPath: "transform")
+                scale.fromValue = NSValue(caTransform3D: fromHidden ? scaled(0.975) : current)
+                scale.toValue = NSValue(caTransform3D: showing ? CATransform3DIdentity : scaled(0.985))
+                scale.duration = duration
+                scale.timingFunction = curve
+                scale.fillMode = .forwards
+                scale.isRemovedOnCompletion = showing
+                layer.add(scale, forKey: "switcherScale")
+            }
+        }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = duration
+            context.timingFunction = curve
+            animator().alphaValue = showing ? 1 : 0
+        }, completionHandler: { [weak self] in
+            guard !showing, let self, self.transitionGeneration == generation else { return }
+            self.finishDismissal()
+        })
+    }
+
+    private func finishDismissal() {
+        transitionGeneration += 1
         if isVisible { orderOut(nil) }
+        glass.layer?.removeAnimation(forKey: "switcherScale")
+        isDismissing = false
         layout = nil
         clearPage()
+        configureApplicationStrip([], frame: .zero, hasWindows: false)
     }
 }

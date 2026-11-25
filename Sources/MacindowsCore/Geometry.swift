@@ -19,6 +19,24 @@ public func dockEdge(dockFrame: CGRect, screenFrame: CGRect) -> DockEdge {
     return dockFrame.midX < screenFrame.midX ? .left : .right
 }
 
+/// 展开中的程序坞会连续报告不同位置。只比较朝向悬停窗的那条边，沿程序坞移动或放大图标不必重新等待。
+public struct DockPreviewBoundary: Equatable {
+    private let screen: CGRect
+    private let edge: DockEdge
+    private let position: CGFloat
+
+    public init?(dockFrame: CGRect, screenFrame: CGRect, edge: DockEdge) {
+        guard !dockFrame.isEmpty, screenFrame.contains(CGPoint(x: dockFrame.midX, y: dockFrame.midY)) else { return nil }
+        screen = screenFrame
+        self.edge = edge
+        switch edge {
+        case .bottom: position = dockFrame.maxY
+        case .left: position = dockFrame.maxX
+        case .right: position = dockFrame.minX
+        }
+    }
+}
+
 /// 悬停窗的左下角位置（AppKit 坐标）：贴在程序坞外侧、对准被悬停的图标，并限制在可见区域内。
 public func panelOrigin(panelSize: CGSize, itemFrame: CGRect, dockFrame: CGRect, edge: DockEdge,
                         visibleFrame: CGRect, gap: CGFloat = 8, margin: CGFloat = 6) -> CGPoint {

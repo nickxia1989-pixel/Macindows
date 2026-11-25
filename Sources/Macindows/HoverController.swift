@@ -49,6 +49,8 @@ final class HoverController {
     /// 离没离开看鼠标的位置，不看程序坞的说法——菜单开着的时候程序坞会说鼠标不在任何图标上，其实鼠标没动过
     private var muted: DockItem?
     private var shown: Shown?
+    /// 鼠标移进预览后程序坞可以再次隐藏。缩略图和窗口列表刷新时仍使用弹出时确认的位置。
+    private var shownLayout: Layout?
     private var signature = ""
     private var showTimer: Timer?
     private var refreshTimer: Timer?
@@ -289,19 +291,16 @@ final class HoverController {
         retryItem = nil
         cancelHide()
         if panel.isVisible {
-            present(item, app: app, snapshot: snapshot)
+            presentWhenReady(item, app: app, snapshot: snapshot, previous: shownLayout?.boundary)
         } else {
             // 悬停窗会贴着程序坞弹出来的话，先把名称气泡那一块的画面截好，弹出时立刻就能遮上
-            if let layout = layout(for: item), layout.canBeSnug { eraser.prepare(labelRect(for: item)) }
+            let initial = layout(for: item)
+            if let initial, initial.canBeSnug, initial.boundary != nil {
+                eraser.prepare(labelRect(for: item))
+            }
             showTimer = timer(showDelay) { [weak self] in
                 guard let self, item.isSame(as: self.hovered) else { return }
-                // 弹出来之前按鼠标的位置再确认一次它还在这个图标上
-                let point = topLeftPoint(fromCocoa: NSEvent.mouseLocation, primaryHeight: primaryScreenHeight)
-                guard self.dock.isMouse(at: point, over: item) else {
-                    self.hovered = nil
-                    return
-                }
-                self.present(item, app: app, snapshot: WindowIndex.snapshot(of: app) ?? snapshot)
+                self.presentWhenReady(item, app: app, snapshot: WindowIndex.snapshot(of: app) ?? snapshot, previous: initial?.boundary)
             }
         }
     }
@@ -375,7 +374,9 @@ final class HoverController {
         showTimer?.invalidate()
         cancelHide()
         hovered = item
-        if let snapshot = WindowIndex.snapshot(of: app) { present(item, app: app, snapshot: snapshot) }
+        if let snapshot = WindowIndex.snapshot(of: app) {
+            presentWhenReady(item, app: app, snapshot: snapshot, previous: shownLayout?.boundary)
+        }
     }
 
     /// 在图标上点了一下（交给了程序坞去切换、还原，或者我们自己把窗口最小化、放回来了）：
@@ -386,11 +387,31 @@ final class HoverController {
         hide()
     }
 
-    private func present(_ item: DockItem, app: NSRunningApplication, snapshot: AppSnapshot) {
+    private func presentWhenReady(_ item: DockItem, app: NSRunningApplication, snapshot: AppSnapshot, previous: DockPreviewBoundary?) {
+        guard isEnabled, !dockMenuOpen, !app.isTerminated else { return }
+        let point = topLeftPoint(fromCocoa: NSEvent.mouseLocation, primaryHeight: primaryScreenHeight)
+        guard let layout = layout(for: item), dock.isMouse(at: point, over: item) else {
+            hovered = nil
+            return
+        }
+        // 正常悬停的两次采样跨越原有的弹出延时。若程序坞仍在移动，只在这次悬停有效期间复查。
+        guard let boundary = layout.boundary, boundary == previous else {
+            showTimer?.invalidate()
+            showTimer = timer(1.0 / 30) { [weak self] in
+                guard let self, item.isSame(as: self.hovered) else { return }
+                self.presentWhenReady(item, app: app, snapshot: snapshot, previous: layout.boundary)
+            }
+            return
+        }
+        present(item, app: app, snapshot: snapshot, layout: layout)
+    }
+
+    private func present(_ item: DockItem, app: NSRunningApplication, snapshot: AppSnapshot, layout: Layout) {
         guard isEnabled, !dockMenuOpen, !app.isTerminated else {
             hide()
             return
         }
+        shownLayout = layout
         if snapshot.windows.isEmpty {
             shown = .empty(item, app)
             signature = ""
@@ -399,9 +420,7 @@ final class HoverController {
             // 和只有一个窗口时的悬停窗一样大，原本放画面的地方是点了以后会出来的那扇窗口
             let (entry, kind) = windowless.entry(for: item, app: app, enabled: showsThumbnails)
             log("show empty card of \(item.title): \(kind)")
-            if let layout = layout(for: item) {
-                place(panel.render(entries: [entry], thumbnails: showsThumbnails, placeholder: app.icon, maxSize: layout.maxSize), layout)
-            }
+            place(panel.render(entries: [entry], thumbnails: showsThumbnails, placeholder: app.icon, maxSize: layout.maxSize), layout)
         } else {
             if case .windows(let current, _, _)? = shown, current.isSame(as: item) {} else {
                 let elsewhere = snapshot.windows.filter { !$0.isOnCurrentSpace }.count
@@ -412,7 +431,7 @@ final class HoverController {
             render()
             loadThumbnails()
         }
-        reveal()
+        reveal(layout)
         updateEraser()
         if refreshTimer == nil {
             let refresh = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.refresh() }
@@ -421,12 +440,12 @@ final class HoverController {
         }
     }
 
-    private func reveal() {
+    private func reveal(_ layout: Layout) {
         cancelHide()
         guard !panel.isVisible else { return }
         panel.alphaValue = 0
         panel.orderFrontRegardless()
-        panel.playEntrance(from: shownEdge, duration: fadeInDuration)
+        panel.playEntrance(from: layout.edge, clearance: isSnug ? snugGap : layout.labelGap, duration: fadeInDuration)
         NSAnimationContext.runAnimationGroup { context in
             context.duration = fadeInDuration
             panel.animator().alphaValue = 1
@@ -443,6 +462,7 @@ final class HoverController {
         isFading = false
         fadeGeneration += 1
         shown = nil
+        shownLayout = nil
         // 收起之后不再跟着鼠标走，「处理过哪个图标」也就不作数了；下次程序坞说鼠标到了哪个图标，都当作新来的。
         // （点过图标之后不想马上再弹的情况另有 muted 管着）
         hovered = nil
@@ -501,9 +521,10 @@ final class HoverController {
     /// 名称气泡占的那一块屏幕（左上角为原点的全局坐标），四周略放宽。尺寸是在底部的程序坞上实测的：
     /// 气泡的上沿在图标上沿之上 35 点，底下的尖角一直伸到图标上沿之上 3 点；宽度是名称的文字宽度加两侧各约 14 点。
     private func labelRect(for item: DockItem) -> CGRect {
+        let frame = item.element.frame ?? item.frame
         let text = (item.title as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 13, weight: .medium)]).width
         let width = (text + 28 + 12).rounded(.up)
-        return CGRect(x: (item.frame.midX - width / 2).rounded(.down), y: item.frame.minY - 38, width: width, height: 37)
+        return CGRect(x: (frame.midX - width / 2).rounded(.down), y: frame.minY - 38, width: width, height: 37)
     }
 
     private func timer(_ delay: TimeInterval, _ block: @escaping () -> Void) -> Timer {
@@ -526,10 +547,9 @@ final class HoverController {
     }
 
     private func render() {
-        guard case .windows(let item, let app, let snapshot)? = shown else { return }
+        guard case .windows(_, let app, let snapshot)? = shown, let layout = shownLayout else { return }
         let list = entries(for: snapshot)
         signature = Self.signature(of: list)
-        guard let layout = layout(for: item) else { return }
         place(panel.render(entries: list, thumbnails: showsThumbnails, placeholder: app.icon, maxSize: layout.maxSize), layout)
     }
 
@@ -537,7 +557,7 @@ final class HoverController {
         entries.map(\.title).joined(separator: "\n")
     }
 
-    private typealias Layout = (edge: DockEdge, itemFrame: CGRect, dockFrame: CGRect, visible: CGRect, maxSize: CGSize, labelGap: CGFloat, canBeSnug: Bool)
+    private typealias Layout = (edge: DockEdge, itemFrame: CGRect, dockFrame: CGRect, visible: CGRect, maxSize: CGSize, labelGap: CGFloat, canBeSnug: Bool, boundary: DockPreviewBoundary?)
 
     private func place(_ size: NSSize, _ layout: Layout) {
         // 遮得掉名称气泡就贴着程序坞摆；遮不掉（没开缩略图，也就没有屏幕录制权限；或者程序坞在侧边）就让到气泡外面
@@ -567,10 +587,14 @@ final class HoverController {
     /// 程序坞贴在哪条边、它占掉的范围，以及悬停窗最大能有多大。全部是 AppKit 坐标。
     private func layout(for item: DockItem) -> Layout? {
         let height = primaryScreenHeight
-        let itemFrame = cocoaRect(fromTopLeft: item.frame, primaryHeight: height)
-        var dockFrame = cocoaRect(fromTopLeft: dock.frame.isNull ? item.frame : dock.frame, primaryHeight: height)
-        guard let screen = NSScreen.screens.first(where: { $0.frame.intersects(itemFrame) }) ?? NSScreen.main else { return nil }
+        guard let liveDock = dock.refreshFrame(), let liveItem = item.element.frame else { return nil }
+        let itemFrame = cocoaRect(fromTopLeft: liveItem, primaryHeight: height)
+        var dockFrame = cocoaRect(fromTopLeft: liveDock, primaryHeight: height)
+        // 图标还在屏幕外时，它的矩形可能落在相邻显示器上。从触发悬停的鼠标位置选择屏幕。
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) })
+                ?? NSScreen.screens.first(where: { $0.frame.intersects(itemFrame) }) else { return nil }
         let edge = dockEdge(dockFrame: dockFrame, screenFrame: screen.frame)
+        let boundary = DockPreviewBoundary(dockFrame: dockFrame, screenFrame: screen.frame, edge: edge)
         // 程序坞的玻璃底板和图标区域不完全重合，以系统为它留出的那条边为准，悬停窗才不会压在上面
         let visible = screen.visibleFrame
         let margin: CGFloat = 12
@@ -590,14 +614,14 @@ final class HoverController {
             maxSize.height = visible.maxY - dockFrame.maxY - gap - margin
         }
         // 名称气泡的位置只在底部的程序坞上量过，侧边的程序坞不遮
-        return (edge, itemFrame, dockFrame, visible, maxSize, gap, showsThumbnails && edge == .bottom)
+        return (edge, itemFrame, dockFrame, visible, maxSize, gap, showsThumbnails && edge == .bottom, boundary)
     }
 
     /// 悬停窗开着的时候每秒看一眼：窗口开了、关了、改了标题，或者 App 退出了，就跟着更新
     private func refresh() {
         // 顺带再问一次程序坞鼠标停在哪：万一漏了通知，悬停窗不至于一直挂着
         dock.report()
-        guard let current = shown else { return }
+        guard let current = shown, let layout = shownLayout else { return }
         guard !current.app.isTerminated else {
             hide()
             return
@@ -611,11 +635,11 @@ final class HoverController {
         refreshFailures = 0
         switch current {
         case .empty(let item, let app):
-            if !snapshot.windows.isEmpty { present(item, app: app, snapshot: snapshot) }
+            if !snapshot.windows.isEmpty { present(item, app: app, snapshot: snapshot, layout: layout) }
         case .windows(let item, let app, _):
             if snapshot.windows.isEmpty {
                 // 最后一个窗口刚被关掉：换成「没有打开的窗口」那一行
-                present(item, app: app, snapshot: snapshot)
+                present(item, app: app, snapshot: snapshot, layout: layout)
             } else {
                 shown = .windows(item, app, snapshot)
                 if Self.signature(of: entries(for: snapshot)) != signature {

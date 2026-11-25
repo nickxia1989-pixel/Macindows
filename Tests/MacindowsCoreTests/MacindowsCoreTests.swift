@@ -167,6 +167,35 @@ final class GeometryTests: XCTestCase {
         XCTAssertEqual(dockEdge(dockFrame: CGRect(x: 800, y: 0, width: 900, height: 70), screenFrame: screen), .bottom)
     }
 
+    func testAutoHiddenBottomDockMustFinishSlidingBeforePreview() {
+        let screen = CGRect(x: 0, y: 0, width: 1512, height: 982)
+        // 实测的辅助功能位置：隐藏、展开到一半、完全展开。
+        func boundary(_ top: CGFloat, x: CGFloat = 88) -> DockPreviewBoundary? {
+            let frame = cocoaRect(fromTopLeft: CGRect(x: x, y: top, width: 1336, height: 69), primaryHeight: screen.height)
+            return DockPreviewBoundary(dockFrame: frame, screenFrame: screen, edge: .bottom)
+        }
+        XCTAssertNil(boundary(982))
+        XCTAssertNil(boundary(979))
+        XCTAssertNotNil(boundary(942))
+        XCTAssertNotEqual(boundary(942), boundary(903))
+        XCTAssertNotEqual(boundary(904), boundary(903))
+        XCTAssertNotNil(boundary(903))
+        XCTAssertEqual(boundary(903), boundary(903, x: 91))
+    }
+
+    func testSideDockRevealOnOffsetDisplay() {
+        let screen = CGRect(x: -1280, y: 200, width: 1280, height: 800)
+        func boundary(_ x: CGFloat, _ edge: DockEdge) -> DockPreviewBoundary? {
+            DockPreviewBoundary(dockFrame: CGRect(x: x, y: 260, width: 60, height: 650), screenFrame: screen, edge: edge)
+        }
+        XCTAssertNil(boundary(-1340, .left))
+        XCTAssertNotNil(boundary(-1270, .left))
+        XCTAssertNotEqual(boundary(-1295, .left), boundary(-1270, .left))
+        XCTAssertNil(boundary(0, .right))
+        XCTAssertNotNil(boundary(-70, .right))
+        XCTAssertNotEqual(boundary(-45, .right), boundary(-70, .right))
+    }
+
     func testPanelSitsBesideALeftDockAndStaysOnScreen() {
         let visible = CGRect(x: 59, y: 0, width: 2501, height: 1410)
         let dock = CGRect(x: 0, y: 400, width: 59, height: 600)

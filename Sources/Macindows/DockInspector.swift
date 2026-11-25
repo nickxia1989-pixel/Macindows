@@ -73,18 +73,19 @@ final class DockInspector {
 
     private var list: AXUIElement? { shared.withLockUnchecked { $0.list } }
 
-    private func refreshFrame() {
+    @discardableResult
+    func refreshFrame() -> CGRect? {
         // 偶尔一次读不到就沿用上次的，不因此当作程序坞不见了
-        if let list {
-            frame = list.frame ?? frame
-        } else {
-            frame = .null
-        }
+        let list = self.list
+        let fresh = list?.frame
+        if let fresh { frame = fresh }
+        else if list == nil { frame = .null }
         let zone = computeZone(), horizontal = frame.isNull || frame.width >= frame.height
         shared.withLockUnchecked {
             $0.zone = zone
             $0.isHorizontal = horizontal
         }
+        return fresh
     }
 
     /// 程序坞认鼠标的范围：图标区域略放宽，并在贴边的那一侧一直延伸到屏幕边缘。

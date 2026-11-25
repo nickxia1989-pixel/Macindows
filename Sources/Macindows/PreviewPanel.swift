@@ -519,9 +519,9 @@ final class PreviewPanel: NSPanel {
     @objc(hasKeyAppearance) var alwaysLooksActive: Bool { true }
 
     /// 出现时从程序坞那一侧滑出来一小段。只挪画面，窗口本身已经在最终的位置上，鼠标该点哪还是点哪
-    func playEntrance(from edge: DockEdge, duration: TimeInterval) {
+    func playEntrance(from edge: DockEdge, clearance: CGFloat = 7, duration: TimeInterval) {
         guard let layer = root.layer else { return }
-        let distance: CGFloat = 7
+        let distance: CGFloat = min(7, clearance)
         let offset: CGSize
         switch edge {
         case .bottom: offset = CGSize(width: 0, height: -distance)

@@ -55,12 +55,14 @@ final class PeekController {
     private func present(animated: Bool) {
         panel.invalidateShadow()
         guard !panel.isVisible || panel.alphaValue < 1 else { return }
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if !panel.isVisible {
-            panel.alphaValue = 0
+            panel.alphaValue = (animated && !reduceMotion) ? 0 : 1
             panel.orderFrontRegardless()
         }
+        guard panel.alphaValue < 1 else { return }
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = animated ? 0.15 : 0
+            context.duration = (animated && !reduceMotion) ? 0.15 : 0
             panel.animator().alphaValue = 1
         }
     }
@@ -70,6 +72,11 @@ final class PeekController {
         let token = generation
         windowID = nil
         guard panel.isVisible else { return }
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            panel.orderOut(nil)
+            imageView.image = nil
+            return
+        }
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.12
             panel.animator().alphaValue = 0

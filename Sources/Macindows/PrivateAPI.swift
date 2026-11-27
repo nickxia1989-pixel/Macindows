@@ -130,19 +130,53 @@ enum PrivateAPI {
 
     // MARK: 逐个编号找窗口
 
+    /// 跨桌面窗口一旦探测到就按 (pid, windowID) 缓存，避免每次悬停/刷新都重跑 1000 次跨进程试探。
+    private struct RemoteWindowKey: Hashable {
+        let pid: pid_t
+        let id: CGWindowID
+    }
+    private static let remoteCacheLock = NSLock()
+    private static var remoteWindowCache: [RemoteWindowKey: AXUIElement] = [:]
+
     /// 一个 App 在辅助功能里的全部窗口元素，包括系统的窗口列表不给的那些（主要是别的桌面上的窗口）。
     ///
     /// 做法是 AltTab、yabai 等工具用了多年的：辅助功能的元素可以凭「进程号 + 编号」直接造出来，
-    /// 把编号从 0 试到 999，是窗口的留下。实测一个 App 试一遍要 15 到 40 毫秒。
+    /// 把编号从 0 试到 999，是窗口的留下。传入 wantedIDs 时会优先核对缓存，并在找齐目标窗口后提前结束。
     /// 试出来的不全是真正的窗口（还有 App 留着没显示的），调用方要自己再筛。要在后台线程或可以等的地方调用。
-    static func windowElements(pid: pid_t) -> [AXUIElement] {
+    static func windowElements(pid: pid_t, wantedIDs: Set<CGWindowID>? = nil) -> [AXUIElement] {
         guard let createWithToken else { return [] }
+        var elements: [AXUIElement] = []
+        var remaining = wantedIDs
+
+        if let targetIDs = wantedIDs, !targetIDs.isEmpty {
+            let cached: [(CGWindowID, AXUIElement)] = remoteCacheLock.withLock {
+                targetIDs.compactMap { id in
+                    remoteWindowCache[RemoteWindowKey(pid: pid, id: id)].map { (id, $0) }
+                }
+            }
+            var stale: [RemoteWindowKey] = []
+            for (id, element) in cached {
+                var role: CFTypeRef?
+                let error = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+                if error == .success, (role as? String) == kAXWindowRole, windowID(of: element) == id {
+                    elements.append(element)
+                    remaining?.remove(id)
+                } else {
+                    stale.append(RemoteWindowKey(pid: pid, id: id))
+                }
+            }
+            if !stale.isEmpty {
+                remoteCacheLock.withLock { stale.forEach { remoteWindowCache.removeValue(forKey: $0) } }
+            }
+            if remaining?.isEmpty == true { return elements }
+        }
+
         // 20 个字节：进程号、0、一个固定的标记（'coco'）、8 字节的编号
         var token = Data(count: 20)
         token.replaceSubrange(0..<4, with: withUnsafeBytes(of: pid) { Data($0) })
         token.replaceSubrange(8..<12, with: withUnsafeBytes(of: Int32(0x636f_636f)) { Data($0) })
-        var elements: [AXUIElement] = []
         var failures = 0
+        var newlyCached: [(RemoteWindowKey, AXUIElement)] = []
         for id in UInt64(0)..<1000 {
             token.replaceSubrange(12..<20, with: withUnsafeBytes(of: id) { Data($0) })
             guard let element = createWithToken(token as CFData)?.takeRetainedValue() else { continue }
@@ -155,7 +189,29 @@ enum PrivateAPI {
                 continue
             }
             failures = 0
-            if error == .success, (role as? String) == kAXWindowRole { elements.append(element) }
+            if error == .success, (role as? String) == kAXWindowRole {
+                if let wid = windowID(of: element) {
+                    if let targetIDs = wantedIDs {
+                        guard targetIDs.contains(wid) else { continue }
+                        newlyCached.append((RemoteWindowKey(pid: pid, id: wid), element))
+                        if remaining?.remove(wid) != nil {
+                            elements.append(element)
+                            if remaining?.isEmpty == true { break }
+                        }
+                    } else {
+                        newlyCached.append((RemoteWindowKey(pid: pid, id: wid), element))
+                        elements.append(element)
+                    }
+                } else if wantedIDs == nil {
+                    elements.append(element)
+                }
+            }
+        }
+        if !newlyCached.isEmpty {
+            remoteCacheLock.withLock {
+                if remoteWindowCache.count > 256 { remoteWindowCache.removeAll() }
+                for (key, element) in newlyCached { remoteWindowCache[key] = element }
+            }
         }
         return elements
     }

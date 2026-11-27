@@ -1,11 +1,19 @@
 import AppKit
 import Carbon.HIToolbox
+import MacindowsCore
 
 /// 仅在开关启用期间安装。键盘回调独占一条轻量线程，窗口枚举、截图和界面都不在输入路径上。
 final class SwitcherShortcut {
     enum Action {
-        case step(backwards: Bool), commit, cancel
-        case applications, windows, openApplication(Int)
+        case step(backwards: Bool)
+        case move(SwitcherDirection)
+        case closeSelected
+        case minimizeSelected
+        case hideSelected
+        case quitSelected
+        case commit
+        case cancel
+        case openApplication(Int)
     }
 
     var onAction: ((_ gesture: Int, _ action: Action) -> Void)?
@@ -16,8 +24,10 @@ final class SwitcherShortcut {
     private var tracking: Int?
     private var visibleApplicationCount: Int?
     private var swallowed = Set<Int>()
+    private var stopping = false
 
     func start() -> Bool {
+        lock.withLock { stopping = false }
         let types: [CGEventType] = [.keyDown, .keyUp, .flagsChanged]
         let mask = types.reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
         let callback: CGEventTapCallBack = { _, type, event, context in
@@ -46,6 +56,7 @@ final class SwitcherShortcut {
     }
 
     func stop() {
+        lock.withLock { stopping = true }
         if let tap { CFMachPortInvalidate(tap) }
         if let loop { CFRunLoopStop(loop) }
         tap = nil
@@ -66,7 +77,13 @@ final class SwitcherShortcut {
         kVK_ANSI_Keypad5: 5, kVK_ANSI_Keypad6: 6, kVK_ANSI_Keypad7: 7, kVK_ANSI_Keypad8: 8, kVK_ANSI_Keypad9: 9
     ]
 
+    private static let arrows: [Int: SwitcherDirection] = [
+        kVK_LeftArrow: .left, kVK_RightArrow: .right,
+        kVK_UpArrow: .up, kVK_DownArrow: .down,
+    ]
+
     func reviveIfNeeded() {
+        guard !lock.withLock({ stopping }) else { return }
         if let tap, !CGEvent.tapIsEnabled(tap: tap) { CGEvent.tapEnable(tap: tap, enable: true) }
     }
 
@@ -81,7 +98,9 @@ final class SwitcherShortcut {
             if let tracking { send(.cancel, for: tracking) }
             tracking = nil
             swallowed.removeAll()
-            DispatchQueue.main.async { [weak self] in self?.reviveIfNeeded() }
+            if !stopping {
+                DispatchQueue.main.async { [weak self] in self?.reviveIfNeeded() }
+            }
             return false
         }
         let flags = event.flags
@@ -109,31 +128,75 @@ final class SwitcherShortcut {
             send(.step(backwards: flags.contains(.maskShift)), for: serial)
             return true
         }
-        if repeating, swallowed.contains(key) { return true }
-        if let tracking, let visibleApplicationCount, flags.contains(.maskCommand),
-           flags.intersection([.maskControl, .maskAlternate, .maskShift]).isEmpty {
-            if let number = Self.digits[key], !flags.contains(.maskSecondaryFn) {
-                swallowed.insert(key)
-                if number <= visibleApplicationCount {
-                    self.tracking = nil
-                    send(.openApplication(number - 1), for: tracking)
+        if repeating, swallowed.contains(key) {
+            // 方向键和反引号允许按住连发，其余被吞掉的按键忽略连发。
+            if let tracking, flags.contains(.maskCommand) {
+                if let direction = Self.arrows[key], flags.intersection([.maskAlternate, .maskControl, .maskShift]).isEmpty {
+                    send(.move(direction), for: tracking)
+                } else if key == kVK_ANSI_Grave, flags.intersection(otherModifiers).isEmpty {
+                    send(.step(backwards: !flags.contains(.maskShift)), for: tracking)
                 }
+            }
+            return true
+        }
+        if let tracking, flags.contains(.maskCommand) {
+            // 反引号：与原生 ⌘Tab 一致，按住 ⌘ 时单手反向选择。
+            if key == kVK_ANSI_Grave, flags.intersection(otherModifiers).isEmpty {
+                swallowed.insert(key)
+                send(.step(backwards: !flags.contains(.maskShift)), for: tracking)
                 return true
             }
-            // 部分键盘给方向键附加 Fn 标志。
-            if visibleApplicationCount > 0, key == kVK_DownArrow || key == kVK_UpArrow {
+            // 方向键在网格中按行列移动（Mac 键盘的方向键会自带 maskSecondaryFn，不能排除它）。
+            if let direction = Self.arrows[key], flags.intersection([.maskAlternate, .maskControl, .maskShift]).isEmpty {
                 swallowed.insert(key)
-                send(key == kVK_DownArrow ? .applications : .windows, for: tracking)
+                send(.move(direction), for: tracking)
                 return true
+            }
+            // 面板已显示时的快捷操作：数字键打开无窗口应用；W 关闭窗口、Q 退出应用、H 隐藏、M 最小化。
+            if visibleApplicationCount != nil,
+               flags.intersection([.maskControl, .maskAlternate, .maskShift, .maskSecondaryFn]).isEmpty {
+                if let number = Self.digits[key], let count = visibleApplicationCount {
+                    swallowed.insert(key)
+                    if number <= count {
+                        self.tracking = nil
+                        send(.openApplication(number - 1), for: tracking)
+                    }
+                    return true
+                }
+                if !repeating {
+                    switch key {
+                    case kVK_ANSI_W:
+                        swallowed.insert(key)
+                        send(.closeSelected, for: tracking)
+                        return true
+                    case kVK_ANSI_Q:
+                        swallowed.insert(key)
+                        send(.quitSelected, for: tracking)
+                        return true
+                    case kVK_ANSI_H:
+                        swallowed.insert(key)
+                        send(.hideSelected, for: tracking)
+                        return true
+                    case kVK_ANSI_M:
+                        swallowed.insert(key)
+                        send(.minimizeSelected, for: tracking)
+                        return true
+                    default:
+                        break
+                    }
+                }
             }
         }
         if let tracking {
             self.tracking = nil
             send(.cancel, for: tracking)
-            if key == kVK_Escape, flags.intersection(otherModifiers).isEmpty {
-                swallowed.insert(key)
-                return true
+            // ⌘Space 仍放行给聚焦搜索；其余按键在切换器打开时吞掉，避免把 ⌘+键 误传给前台应用。
+            if key == kVK_Space, flags.contains(.maskCommand), flags.intersection(otherModifiers).isEmpty {
+                swallowed.remove(key)
+                return false
             }
+            swallowed.insert(key)
+            return true
         }
         swallowed.remove(key)
         return false

@@ -31,7 +31,7 @@ final class OnboardingWindowController: NSWindowController {
 
         let button = NSButton(title: L("打开系统设置"), target: self, action: #selector(openSettings))
         button.bezelStyle = .push
-        button.keyEquivalent = "\\r"
+        button.keyEquivalent = "\r"
 
         status.font = .systemFont(ofSize: 12)
         status.textColor = .secondaryLabelColor

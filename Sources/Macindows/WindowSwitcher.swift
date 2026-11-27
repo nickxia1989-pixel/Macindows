@@ -8,14 +8,16 @@ final class WindowSwitcher {
         let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
         var cycle: WindowCycle
-        var windows: [SwitcherEntry] = []
-        var applications: [SwitcherEntry] = []
+        var entries: [SwitcherEntry] = []
+        var numberedEntries: [Int] = []
         var appBadges: [String: String] = [:]
-        var remaining = 0
+        var pendingApps: [pid_t: NSRunningApplication] = [:]
+        var deadlineTimer: Timer?
+        var ready = false
         var hasCurrent = false
         var released = false
-        var selected: SwitcherChoice? {
-            cycle.selection(windows: windows.count, applications: applications.count, hasCurrent: hasCurrent)
+        var selected: Int? {
+            cycle.index(count: entries.count, hasCurrent: hasCurrent)
         }
 
         init(_ gesture: Int, backwards: Bool) {
@@ -26,10 +28,16 @@ final class WindowSwitcher {
 
     var onBegin: (() -> Void)?
     var readApplicationBadges: (() -> [String: String])?
+    /// 切换器尚未记录最后关闭画面时，向程序坞无窗口预览模块借图（例如飞书、备忘录等保留窗口）。
+    var fallbackWindowlessPreview: ((NSRunningApplication) -> NSImage?)?
+    private let previewCache: SharedPreviewCache
     private let history = WindowFocusHistory()
     private var shortcut: SwitcherShortcut?
     private var panel: SwitcherPanel?
     private var session: Session?
+    /// 刚刚由本切换器触发的目标进程，短时间内允许前台进程从旧值过渡到它而不误取消下一次连按。
+    private var lastPickedPID: pid_t?
+    private var lastPickedUntil: TimeInterval = 0
     private let workers: OperationQueue = {
         let queue = OperationQueue()
         queue.name = "macindows.switcher-windows"
@@ -38,7 +46,21 @@ final class WindowSwitcher {
         return queue
     }()
 
+    init(previewCache: SharedPreviewCache = SharedPreviewCache()) {
+        self.previewCache = previewCache
+    }
+
     var isRunning: Bool { shortcut != nil }
+
+    func lastClosedPreview(for app: NSRunningApplication) -> NSImage? {
+        panel?.lastClosedPreview(for: app)
+    }
+
+    /// 程序坞悬停点击切换窗口时也记入最近使用顺序，保持两边排序一致。
+    func noteFocused(app: NSRunningApplication, window: AppWindow) {
+        guard shortcut != nil else { return }
+        history.note(SwitcherWindowKey(pid: app.processIdentifier, element: window.element, id: window.id))
+    }
 
     func start() {
         guard shortcut == nil else { return }
@@ -49,16 +71,16 @@ final class WindowSwitcher {
         }
         guard input.start() else { log("window switcher: could not install keyboard shortcut"); return }
         shortcut = input
-        let panel = SwitcherPanel()
+        let panel = SwitcherPanel(previewCache: previewCache)
         panel.onPick = { [weak self] in self?.pick($0) }
+        panel.onClose = { [weak self] in self?.closeEntry(at: $0) }
+        panel.onTurnPage = { [weak self] delta in self?.turnPage(by: delta) }
         panel.onReveal = { [weak self] in
             guard let self, let session = self.session else { return }
-            self.shortcut?.panelDidShow(for: session.gesture, applicationCount: session.applications.count)
+            self.shortcut?.panelDidShow(for: session.gesture, applicationCount: session.numberedEntries.count)
         }
         self.panel = panel
-        history.onFocus = { [weak panel] key in
-            if case .numbered(let pid, let id) = key { panel?.warmPreview(pid: pid, id: id) }
-        }
+        history.onFocus = { [weak panel] key in panel?.focusPreview(key) }
         history.start()
     }
 
@@ -94,20 +116,38 @@ final class WindowSwitcher {
                 onBegin?()
                 load(session)
             }
+        case .move(let direction):
+            guard let session, session.gesture == gesture, session.ready,
+                  let current = session.selected,
+                  let next = panel?.neighbor(from: current, direction: direction) else { return }
+            session.cycle.setIndex(next, hasCurrent: session.hasCurrent)
+            update(session)
+        case .closeSelected:
+            guard let session, session.gesture == gesture, session.ready,
+                  let index = session.selected else { return }
+            closeEntry(at: index)
+        case .minimizeSelected:
+            guard let session, session.gesture == gesture, session.ready,
+                  let index = session.selected else { return }
+            minimizeEntry(at: index)
+        case .hideSelected:
+            guard let session, session.gesture == gesture, session.ready,
+                  let index = session.selected else { return }
+            hideEntry(at: index)
+        case .quitSelected:
+            guard let session, session.gesture == gesture, session.ready,
+                  let index = session.selected else { return }
+            quitEntry(at: index)
         case .commit:
             guard let session, session.gesture == gesture else { return }
             session.released = true
             update(session)
         case .cancel:
             if session?.gesture == gesture { dismiss() }
-        case .applications, .windows:
-            guard let session, session.gesture == gesture, !session.windows.isEmpty, !session.applications.isEmpty else { return }
-            if case .applications = action { session.cycle.enterApplications() }
-            else { session.cycle.returnToWindows() }
-            update(session)
         case .openApplication(let i):
-            guard session?.gesture == gesture, panel?.isVisible == true else { return }
-            pick(.application(i))
+            guard let session, session.gesture == gesture, panel?.isVisible == true,
+                  session.numberedEntries.indices.contains(i) else { return }
+            pick(session.numberedEntries[i])
         }
     }
 
@@ -115,8 +155,21 @@ final class WindowSwitcher {
         let apps = NSWorkspace.shared.runningApplications.filter {
             $0.activationPolicy == .regular && $0.processIdentifier != ProcessInfo.processInfo.processIdentifier
         }
-        session.remaining = apps.count
-        guard !apps.isEmpty else { update(session); return }
+        guard !apps.isEmpty else {
+            session.ready = true
+            update(session)
+            return
+        }
+        for app in apps { session.pendingApps[app.processIdentifier] = app }
+
+        // 个别应用卡顿时不让整个切换器无限干等：140ms 后先用已就绪的窗口弹出，未应答的作为应用兜底卡保留。
+        let deadline = Timer(timeInterval: 0.14, repeats: false) { [weak self, weak session] _ in
+            guard let self, let session, self.session === session, !session.ready else { return }
+            self.finalize(session)
+        }
+        RunLoop.main.add(deadline, forMode: .common)
+        session.deadlineTimer = deadline
+
         // 程序坞应答较晚时也能先显示窗口、松键切换。
         if let readApplicationBadges {
             workers.addOperation { [weak self, weak session] in
@@ -128,93 +181,199 @@ final class WindowSwitcher {
                 }
             }
         }
-        for app in apps {
-            workers.addOperation { [weak self, weak session] in
-                guard session != nil else { return }
-                let snapshot = WindowIndex.snapshot(of: app)
-                DispatchQueue.main.async { [weak self, weak session] in
-                    guard let self, let session, self.session === session else { return }
-                    if let snapshot, !app.isTerminated {
-                        if snapshot.windows.isEmpty {
-                            session.applications.append(SwitcherEntry(app: app, window: nil))
-                        } else {
-                            session.windows += snapshot.windows.map { SwitcherEntry(app: app, window: $0) }
+        // 整批枚举共用一份桌面布局与窗口列表快照，避免每个应用重复向窗口服务器查询。
+        workers.addOperation { [weak self, weak session] in
+            guard let self, session != nil else { return }
+            let context = WindowIndex.SnapshotContext.capture()
+            for app in apps {
+                self.workers.addOperation { [weak self, weak session] in
+                    guard session != nil else { return }
+                    let snapshot = WindowIndex.snapshot(of: app, context: context)
+                    DispatchQueue.main.async { [weak self, weak session] in
+                        guard let self, let session, self.session === session, !session.ready else { return }
+                        session.pendingApps.removeValue(forKey: app.processIdentifier)
+                        if !app.isTerminated {
+                            if let snapshot {
+                                let lastPreview = self.panel?.preview(for: snapshot)
+                                    ?? (snapshot.windows.isEmpty ? self.fallbackWindowlessPreview?(app) : nil)
+                                if snapshot.windows.isEmpty {
+                                    session.entries.append(SwitcherEntry(app: app, window: nil, lastPreview: lastPreview))
+                                } else {
+                                    session.entries += snapshot.windows.map { SwitcherEntry(app: app, window: $0) }
+                                }
+                            } else {
+                                // 应用一时未应答时仍保留为兜底卡片，避免从 ⌘Tab 里消失。
+                                let preview = self.panel?.lastClosedPreview(for: app) ?? self.fallbackWindowlessPreview?(app)
+                                session.entries.append(SwitcherEntry(app: app, window: nil, lastPreview: preview, isFallback: true))
+                            }
                         }
-                    }
-                    session.remaining -= 1
-                    if session.remaining == 0 {
-                        self.sort(session)
-                        self.update(session)
+                        if session.pendingApps.isEmpty {
+                            self.finalize(session)
+                        }
                     }
                 }
             }
         }
     }
 
+    private func finalize(_ session: Session) {
+        guard !session.ready else { return }
+        session.deadlineTimer?.invalidate()
+        session.deadlineTimer = nil
+        for app in session.pendingApps.values where !app.isTerminated {
+            let preview = panel?.lastClosedPreview(for: app) ?? fallbackWindowlessPreview?(app)
+            session.entries.append(SwitcherEntry(app: app, window: nil, lastPreview: preview, isFallback: true))
+        }
+        session.pendingApps.removeAll()
+        session.ready = true
+        sort(session)
+        update(session)
+    }
+
     private func sort(_ session: Session) {
-        // 没有焦点记录的窗口按系统窗口号从新到旧排列；最小化、隐藏和桌面归属都不参与比较。
         let ranks = history.ranks
-        func byRecency(_ a: SwitcherEntry, _ b: SwitcherEntry) -> Bool {
+        session.entries.sort { a, b in
             let left = ranks[a.key] ?? .max, right = ranks[b.key] ?? .max
             if left != right { return left < right }
+            // 未观察到焦点时，按应用启动时间、进程和窗口号给两种卡片一致且稳定的次序。
+            let aLaunch = a.app.launchDate ?? .distantPast, bLaunch = b.app.launchDate ?? .distantPast
+            if aLaunch != bLaunch { return aLaunch > bLaunch }
+            if a.app.processIdentifier != b.app.processIdentifier { return a.app.processIdentifier > b.app.processIdentifier }
             if a.window?.id != b.window?.id { return (a.window?.id ?? 0) > (b.window?.id ?? 0) }
-            if a.app.processIdentifier != b.app.processIdentifier { return a.app.processIdentifier < b.app.processIdentifier }
             return a.title < b.title
         }
-        session.windows.sort(by: byRecency)
-        session.applications.sort(by: byRecency)
-        let candidates = session.windows.indices.filter {
-            let entry = session.windows[$0]
+        let candidates = session.entries.indices.filter {
+            let entry = session.entries[$0]
             guard entry.app.processIdentifier == session.frontPID, !entry.app.isHidden, let window = entry.window else { return false }
             return !window.isMinimized && window.isOnCurrentSpace
         }
-        var current = candidates.first { session.windows[$0].window?.isMain == true }
+        var current = candidates.first { session.entries[$0].window?.isMain == true }
         if current == nil, let frontPID = session.frontPID {
             // 有些应用不标记主窗口。可见层级仅用于辨认当前窗口，其他窗口保留自己的使用顺序。
             let visible = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
             for info in visible where info[kCGWindowOwnerPID as String] as? pid_t == frontPID {
                 if let id = info[kCGWindowNumber as String] as? CGWindowID,
-                   let match = candidates.first(where: { session.windows[$0].window?.id == id }) {
+                   let match = candidates.first(where: { session.entries[$0].window?.id == id }) {
                     current = match
                     break
                 }
             }
         }
+        if current == nil {
+            current = session.entries.firstIndex { $0.app.processIdentifier == session.frontPID && $0.window == nil && !$0.app.isHidden }
+        }
         if let current {
-            let entry = session.windows.remove(at: current)
+            let entry = session.entries.remove(at: current)
             history.note(entry.key)
-            session.windows.insert(entry, at: 0)
+            session.entries.insert(entry, at: 0)
             session.hasCurrent = true
+        }
+        assignShortcutNumbers(in: session)
+    }
+
+    private func assignShortcutNumbers(in session: Session) {
+        for i in session.entries.indices { session.entries[i].shortcutNumber = nil }
+        session.numberedEntries = Array(session.entries.indices.filter {
+            session.entries[$0].window == nil && !session.entries[$0].isFallback
+        }.prefix(9))
+        for (number, index) in session.numberedEntries.enumerated() {
+            session.entries[index].shortcutNumber = number + 1
         }
     }
 
     private func update(_ session: Session) {
-        guard session.remaining == 0 else { return }
-        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == session.frontPID else { dismiss(); return }
+        guard session.ready else { return }
+        let currentFront = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        if currentFront != session.frontPID {
+            let recentlyPicked = ProcessInfo.processInfo.systemUptime < lastPickedUntil
+                && (currentFront == lastPickedPID || session.frontPID == lastPickedPID)
+            if !recentlyPicked && !session.released {
+                dismiss()
+                return
+            }
+        }
         if session.released {
             if let index = session.selected { pick(index) } else { dismiss() }
         } else if let screen = session.screen {
             if let choice = session.selected {
-                let windowIndex = session.cycle.index(count: session.windows.count, hasCurrent: session.hasCurrent)
-                panel?.present(windows: session.windows, applications: session.applications, selected: choice,
-                               windowIndex: windowIndex, on: screen, appBadges: session.appBadges)
+                panel?.present(entries: session.entries, selected: choice, on: screen, appBadges: session.appBadges)
             } else {
                 panel?.showEmpty(on: screen)
             }
         }
     }
 
-    private func pick(_ choice: SwitcherChoice) {
-        guard let session, session.remaining == 0 else { return }
-        let entry: SwitcherEntry
-        switch choice {
-        case .window(let i):
-            guard session.windows.indices.contains(i) else { return }
-            entry = session.windows[i]
-        case .application(let i):
-            guard session.applications.indices.contains(i) else { return }
-            entry = session.applications[i]
+    private func turnPage(by delta: Int) {
+        guard let session, session.ready, let selected = session.selected,
+              let target = panel?.pageFirstIndex(offsetBy: delta, from: selected) else { return }
+        session.cycle.setIndex(target, hasCurrent: session.hasCurrent)
+        update(session)
+    }
+
+    private func closeEntry(at index: Int) {
+        guard let session, session.ready, session.entries.indices.contains(index) else { return }
+        let entry = session.entries[index]
+        guard let window = entry.window else { return }
+        log("switcher close window \(window.id.map(String.init) ?? "-") of \(entry.appName)")
+        WindowIndex.actions.async { [weak self] in
+            WindowIndex.close(window, of: entry.app) {
+                self?.dismiss()
+            }
         }
+        removeEntries(in: session, matching: { $0 == index }, anchor: index)
+    }
+
+    private func minimizeEntry(at index: Int) {
+        guard let session, session.ready, session.entries.indices.contains(index) else { return }
+        let entry = session.entries[index]
+        guard let window = entry.window, !window.isMinimized, window.canMinimize else { return }
+        log("switcher minimize window \(window.id.map(String.init) ?? "-") of \(entry.appName)")
+        session.entries[index].window = window.with(minimized: true)
+        WindowIndex.actions.async { WindowIndex.minimize(window) }
+        panel?.invalidateLayout()
+        update(session)
+    }
+
+    private func hideEntry(at index: Int) {
+        guard let session, session.ready, session.entries.indices.contains(index) else { return }
+        let entry = session.entries[index]
+        guard !entry.app.isHidden else { return }
+        log("switcher hide \(entry.appName)")
+        WindowIndex.hide(entry.app)
+        panel?.invalidateLayout()
+        update(session)
+    }
+
+    private func quitEntry(at index: Int) {
+        guard let session, session.ready, session.entries.indices.contains(index) else { return }
+        let app = session.entries[index].app
+        let pid = app.processIdentifier
+        log("switcher quit \(session.entries[index].appName)")
+        WindowIndex.quit(app)
+        removeEntries(in: session, matching: { session.entries[$0].app.processIdentifier == pid }, anchor: index)
+    }
+
+    private func removeEntries(in session: Session, matching shouldRemove: (Int) -> Bool, anchor: Int) {
+        let kept = session.entries.enumerated().filter { !shouldRemove($0.offset) }.map(\.element)
+        session.entries = kept
+        if kept.isEmpty {
+            dismiss()
+            return
+        }
+        assignShortcutNumbers(in: session)
+        let clamped = min(anchor, kept.count - 1)
+        session.cycle.setIndex(clamped, hasCurrent: session.hasCurrent)
+        shortcut?.panelDidShow(for: session.gesture, applicationCount: session.numberedEntries.count)
+        panel?.invalidateLayout()
+        update(session)
+    }
+
+    private func pick(_ index: Int) {
+        guard let session, session.ready, session.entries.indices.contains(index) else { return }
+        let entry = session.entries[index]
+        history.note(entry.key)
+        lastPickedPID = entry.app.processIdentifier
+        lastPickedUntil = ProcessInfo.processInfo.systemUptime + 0.45
         dismiss()
         WindowIndex.actions.async {
             guard !entry.app.isTerminated else { return }
@@ -237,7 +396,11 @@ final class WindowSwitcher {
     }
 
     private func dismiss(animated: Bool = true) {
-        if let session { shortcut?.end(session.gesture) }
+        if let session {
+            session.deadlineTimer?.invalidate()
+            session.deadlineTimer = nil
+            shortcut?.end(session.gesture)
+        }
         session = nil
         workers.cancelAllOperations()
         panel?.dismiss(animated: animated)

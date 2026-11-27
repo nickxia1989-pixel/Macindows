@@ -5,10 +5,13 @@ import os
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
-    private let hover = HoverController()
+    private var statusMenu: NSMenu!
+    private let previewCache = SharedPreviewCache()
+    private lazy var hover = HoverController(previewCache: previewCache)
     private let interceptor = ClickInterceptor()
-    private let switcher = WindowSwitcher()
+    private lazy var switcher = WindowSwitcher(previewCache: previewCache)
     private var onboarding: OnboardingWindowController?
+    private var reopenObserver: NSObjectProtocol?
     private var trustTimer: Timer?
     private var healthTimer: Timer?
     private var running = false
@@ -33,6 +36,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         log("launch Macindows \(version) on macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
         defaults.register(defaults: ["enabled": true, "thumbnails": false, "peek": true, "windowSwitcher": false])
         buildStatusItem()
+        statusItem.button?.appearsDisabled = !defaults.bool(forKey: "enabled")
+        reopenObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("com.xianing.Macindows.reopen"),
+            object: Bundle.main.bundleIdentifier,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleDuplicateLaunch()
+        }
 
         if Accessibility.promptIfNeeded() {
             startServices()
@@ -54,6 +65,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         log("terminate")
+        if let reopenObserver { DistributedNotificationCenter.default().removeObserver(reopenObserver) }
+        reopenObserver = nil
         healthTimer?.invalidate()
         switcher.stop()
         interceptor.stop()
@@ -65,7 +78,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !running else { return }
         running = true
         Accessibility.limitWaiting()
+        hover.onWindowFocused = { [weak self] app, window in self?.switcher.noteFocused(app: app, window: window) }
+        hover.externalWindowlessPreview = { [weak self] app in self?.switcher.lastClosedPreview(for: app) }
         switcher.readApplicationBadges = { [dock = hover.dock] in dock.applicationBadgeNumbers() }
+        switcher.fallbackWindowlessPreview = { [weak self] app in self?.hover.fallbackWindowlessPreview(for: app) }
         switcher.onBegin = { [weak self] in
             self?.forgetToggle()
             self?.hover.dismissAfterClick()
@@ -95,6 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func setEnabled(_ value: Bool) {
         hover.isEnabled = value
         enabled.withLock { $0 = value }
+        statusItem?.button?.appearsDisabled = !value
         updateWindowSwitcher()
     }
 
@@ -211,9 +228,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func buildStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = MenuBarIcon.image
-        let menu = NSMenu()
-        menu.delegate = self
-        statusItem.menu = menu
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(statusItemClicked)
+        statusItem.button?.sendAction(on: [.leftMouseDown, .rightMouseDown])
+        statusMenu = NSMenu()
+        statusMenu.delegate = self
+    }
+
+    /// 正常点击打开菜单；按住 ⌥ 点击快速暂停/恢复 Macindows。
+    @objc private func statusItemClicked() {
+        if let event = NSApp.currentEvent, event.type == .leftMouseDown, event.modifierFlags.contains(.option) {
+            toggleEnabled()
+            return
+        }
+        openStatusMenu()
+    }
+
+    private func openStatusMenu() {
+        statusItem.menu = statusMenu
+        statusItem.button?.performClick(nil)
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        statusItem.menu = nil
+    }
+
+    private func handleDuplicateLaunch() {
+        if let onboarding, onboarding.window?.isVisible == true {
+            onboarding.present()
+        } else {
+            openStatusMenu()
+        }
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -246,10 +291,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             grant.target = self
             grant.indentationLevel = 1
             menu.addItem(grant)
-            let hint = NSMenuItem(title: L("授权后请重新打开 Macindows"), action: nil, keyEquivalent: "")
-            hint.indentationLevel = 1
-            hint.isEnabled = false
-            menu.addItem(hint)
+            let relaunch = NSMenuItem(title: L("授权后点此重新启动 Macindows"), action: #selector(relaunchApp), keyEquivalent: "")
+            relaunch.target = self
+            relaunch.indentationLevel = 1
+            menu.addItem(relaunch)
         }
 
         let login = NSMenuItem(title: L("登录时自动启动"), action: #selector(toggleLoginItem), keyEquivalent: "")
@@ -264,19 +309,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         access.isEnabled = !trusted
         menu.addItem(access)
         if trusted, running, !interceptor.isRunning {
-            let hint = NSMenuItem(title: L("点击拦截未能启动，请重新打开 Macindows"), action: nil, keyEquivalent: "")
-            hint.isEnabled = false
-            menu.addItem(hint)
+            let retry = NSMenuItem(title: L("点击拦截未能启动，点此重试"), action: #selector(retryClickInterceptor), keyEquivalent: "")
+            retry.target = self
+            menu.addItem(retry)
         }
         if trusted, running, defaults.bool(forKey: "enabled"), defaults.bool(forKey: "windowSwitcher"), !switcher.isRunning {
-            menu.addItem(NSMenuItem(title: L("⌘Tab 未能启用，请关闭并重新打开窗口切换开关"), action: nil, keyEquivalent: ""))
+            let retry = NSMenuItem(title: L("⌘Tab 未能启用，点此重试"), action: #selector(retryWindowSwitcher), keyEquivalent: "")
+            retry.target = self
+            menu.addItem(retry)
         }
 
         let logItem = NSMenuItem(title: L("在访达中显示日志"), action: #selector(revealLog), keyEquivalent: "")
         logItem.target = self
         menu.addItem(logItem)
 
+        // 按住 ⌥ 打开菜单时，日志项切换为「生成并在访达中显示诊断报告」，不增加日常菜单行数。
+        let diagnoseItem = NSMenuItem(title: L("生成并在访达中显示诊断报告"), action: #selector(runAndRevealDiagnose), keyEquivalent: "")
+        diagnoseItem.target = self
+        diagnoseItem.isAlternate = true
+        diagnoseItem.keyEquivalentModifierMask = .option
+        menu.addItem(diagnoseItem)
+
         menu.addItem(.separator())
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+        let versionItem = NSMenuItem(title: "Macindows \(version)", action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
         menu.addItem(NSMenuItem(title: L("退出 Macindows"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
@@ -333,8 +391,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func openScreenRecordingSettings() { Thumbnailer.openSettings() }
 
+    @objc private func retryClickInterceptor() {
+        interceptor.stop()
+        let ok = interceptor.start()
+        log("manual retry click interception -> \(ok ? "on" : "FAILED")")
+    }
+
+    @objc private func retryWindowSwitcher() {
+        switcher.stop()
+        updateWindowSwitcher()
+        log("manual retry window switcher -> \(switcher.isRunning ? "on" : "FAILED")")
+    }
+
+    @objc private func relaunchApp() {
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        configuration.arguments = ["--relaunch", String(pid)]
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, error in
+            if let error {
+                log("relaunch failed: \(error.localizedDescription)")
+                return
+            }
+            DispatchQueue.main.async { NSApp.terminate(nil) }
+        }
+    }
+
     @objc private func revealLog() {
         Log.flush()
         NSWorkspace.shared.activateFileViewerSelecting([Log.url])
+    }
+
+    @objc private func runAndRevealDiagnose() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            Diagnose.run()
+            DispatchQueue.main.async {
+                NSWorkspace.shared.activateFileViewerSelecting([Diagnose.url])
+            }
+        }
     }
 }

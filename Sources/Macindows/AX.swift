@@ -48,6 +48,11 @@ extension AXUIElement {
         AXUIElementSetAttributeValue(self, name as CFString, value) == .success
     }
 
+    func isSettable(_ name: String) -> Bool {
+        var settable = DarwinBoolean(false)
+        return AXUIElementIsAttributeSettable(self, name as CFString, &settable) == .success && settable.boolValue
+    }
+
     @discardableResult
     func perform(_ action: String) -> Bool {
         AXUIElementPerformAction(self, action as CFString) == .success

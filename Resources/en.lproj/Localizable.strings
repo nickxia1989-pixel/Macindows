@@ -4,15 +4,16 @@
 "启用 Macindows" = "Enable Macindows";
 "显示程序坞窗口缩略图" = "Show Dock Window Thumbnails";
 "用 ⌘Tab 切换窗口" = "Switch Windows with ⌘Tab";
-"⌘Tab 未能启用，请关闭并重新打开窗口切换开关" = "⌘Tab Unavailable. Turn the Window Switcher Off and On to Retry.";
+"⌘Tab 未能启用，点此重试" = "⌘Tab Unavailable — Click to Retry";
 "停在缩略图上时预览整个窗口" = "Preview the Whole Window When Resting on a Thumbnail";
 "需要“录屏与系统录音”权限，点此打开系统设置" = "Needs Screen & System Audio Recording Permission. Click to Open System Settings";
-"授权后请重新打开 Macindows" = "Reopen Macindows after granting it.";
+"授权后点此重新启动 Macindows" = "Click to Relaunch Macindows After Granting";
 "登录时自动启动" = "Launch at Login";
 "辅助功能权限：已授权" = "Accessibility: Granted";
 "辅助功能权限：未授权，点此打开系统设置" = "Accessibility: Not Granted. Click to Open System Settings";
-"点击拦截未能启动，请重新打开 Macindows" = "Click handling could not start. Please reopen Macindows.";
+"点击拦截未能启动，点此重试" = "Click Handling Unavailable — Click to Retry";
 "在访达中显示日志" = "Show Log in Finder";
+"生成并在访达中显示诊断报告" = "Generate & Show Diagnostic Report in Finder";
 "退出 Macindows" = "Quit Macindows";
 "无法更改登录时自动启动" = "Couldn’t Change Launch at Login";
 
@@ -34,7 +35,10 @@
 "切换窗口" = "Switch Windows";
 "没有可切换的窗口" = "No windows to switch to";
 "没有打开的窗口" = "No open windows";
-"无窗口应用" = "Apps without windows";
+"无打开窗口" = "No Open Windows";
+"已最小化" = "Minimized";
+"已隐藏" = "Hidden";
+"其他桌面" = "Other Desktop";
 "快捷键 %d" = "Shortcut %d";
 "应用" = "Application";
 "第 %d / %d 页" = "Page %d of %d";

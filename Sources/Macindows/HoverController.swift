@@ -15,6 +15,19 @@ final class HoverController {
     var wantsThumbnails = false
     /// 鼠标在悬停窗的某一项上停住时，要不要在那扇窗口原本的位置上预览它
     var wantsPeek = true { didSet { if !wantsPeek { endPeek() } } }
+    /// 点击悬停窗切换窗口时通知外部（供 ⌘Tab 切换器同步最近使用顺序）
+    var onWindowFocused: ((NSRunningApplication, AppWindow) -> Void)?
+    /// 无窗口应用兜底预览的外部来源（例如 ⌘Tab 切换器在最后一扇窗口关闭前缓存的画面）
+    var externalWindowlessPreview: ((NSRunningApplication) -> NSImage?)? {
+        get { windowless.externalPreview }
+        set { windowless.externalPreview = newValue }
+    }
+
+    private let previewCache: SharedPreviewCache
+
+    init(previewCache: SharedPreviewCache = SharedPreviewCache()) {
+        self.previewCache = previewCache
+    }
 
     /// 悬停窗当前显示的内容
     private enum Shown {
@@ -53,7 +66,11 @@ final class HoverController {
     private var shownLayout: Layout?
     private var signature = ""
     private var showTimer: Timer?
+    private var switchTimer: Timer?
     private var refreshTimer: Timer?
+    private let snapshotQueue = DispatchQueue(label: "macindows.hover-snapshot", qos: .userInitiated)
+    private var snapshotGeneration = 0
+    private var refreshInFlight = false
     /// App 一时没应答（正忙或刚启动）时的重试
     private var retryTimer: Timer?
     private var retryItem: DockItem?
@@ -83,8 +100,6 @@ final class HoverController {
     private var menuTimer: Timer?
     private var menuSeen = false
     private var menuDeadline: TimeInterval = 0
-    /// 最近截到的画面。窗口最小化或隐藏后截不到新的，就用它
-    private var thumbnailCache: [CGWindowID: NSImage] = [:]
     private var peekTimer: Timer?
     private var peekEndTimer: Timer?
     private var settleTimer: Timer?
@@ -92,6 +107,10 @@ final class HoverController {
     private let windowless = WindowlessPreviews()
 
     private let showDelay: TimeInterval = 0.25
+    /// 鼠标刚停到图标上先等一小段再发后台 AX 查询，快速扫过程序坞时不惊动任何 App
+    private let prefetchDelay: TimeInterval = 0.1
+    /// 悬停窗已打开时在程序坞图标间移动的轻微防抖，避免滑过多个图标时连续闪切
+    private let switchDelay: TimeInterval = 0.075
     private let fadeInDuration: TimeInterval = 0.175
     private let fadeOutDuration: TimeInterval = 0.4
     /// 鼠标被判定为「路过」之后如果就此停住，过这么久按它停住的位置重新处理
@@ -208,6 +227,15 @@ final class HoverController {
     private func evaluate(fromDock: Bool = false, honoringAim: Bool = true) {
         guard isEnabled, !dockMenuOpen else { return }
         let location = NSEvent.mouseLocation
+        // 拖拽文件到程序坞图标、拖图标排序或按住鼠标拖动期间，不弹出悬停窗；
+        // 但如果鼠标正按在悬停窗内部（点击卡片或关闭按钮的过程），保持原样。
+        if NSEvent.pressedMouseButtons != 0 {
+            if panel.isVisible, panel.cardFrame.insetBy(dx: -4, dy: -4).contains(location) { return }
+            showTimer?.invalidate()
+            switchTimer?.invalidate()
+            if panel.isVisible { hide() }
+            return
+        }
         let point = topLeftPoint(fromCocoa: location, primaryHeight: primaryScreenHeight)
         if let muted, !dock.isMouse(at: point, over: muted) { unmute() }
         // 悬停窗里哪一项该亮，每次都按鼠标的实际位置重新确定一遍（和窗口自己收到的鼠标事件互为备份）
@@ -258,7 +286,10 @@ final class HoverController {
         guard item != nil || hovered != nil else { return }
         hovered = item
         showTimer?.invalidate()
+        switchTimer?.invalidate()
         retryTimer?.invalidate()
+        snapshotGeneration += 1
+        let generation = snapshotGeneration
         // 刚点过这个图标、或者它的菜单刚关：鼠标还没离开过，不再为它弹
         if let item, item.isSame(as: muted) {
             scheduleHide()
@@ -269,38 +300,67 @@ final class HoverController {
             scheduleHide()
             return
         }
-        guard let snapshot = WindowIndex.snapshot(of: app) else {
-            // App 在运行，但这一次没读到它的窗口（它正忙，或者是启动后第一次问它，应答慢了）。
-            // 鼠标还停在这个图标上的话过一会儿再问，最多再问两次，而不是就此什么都不显示
-            scheduleHide()
-            if !item.isSame(as: retryItem) {
-                retryItem = item
-                retryAttempts = 0
-            }
-            if retryAttempts < 2 {
-                retryAttempts += 1
-                log("no answer from \(item.title), retry \(retryAttempts)")
-                retryTimer = timer(0.4) { [weak self] in
-                    guard let self, item.isSame(as: self.hovered) else { return }
-                    self.hovered = nil
-                    self.evaluate()
-                }
-            }
-            return
-        }
-        retryItem = nil
-        cancelHide()
         if panel.isVisible {
-            presentWhenReady(item, app: app, snapshot: snapshot, previous: shownLayout?.boundary)
+            // 已显示悬停窗时略作防抖再切到下一个图标，避免滑过多个图标时连续闪切且在主线程同步阻塞
+            let boundary = shownLayout?.boundary
+            switchTimer = timer(switchDelay) { [weak self] in
+                guard let self, generation == self.snapshotGeneration, item.isSame(as: self.hovered) else { return }
+                self.fetchSnapshot(for: item, app: app, generation: generation, previousBoundary: boundary, showAt: nil)
+            }
         } else {
             // 悬停窗会贴着程序坞弹出来的话，先把名称气泡那一块的画面截好，弹出时立刻就能遮上
             let initial = layout(for: item)
             if let initial, initial.canBeSnug, initial.boundary != nil {
                 eraser.prepare(labelRect(for: item))
             }
-            showTimer = timer(showDelay) { [weak self] in
-                guard let self, item.isSame(as: self.hovered) else { return }
-                self.presentWhenReady(item, app: app, snapshot: WindowIndex.snapshot(of: app) ?? snapshot, previous: initial?.boundary)
+            let showAt = ProcessInfo.processInfo.systemUptime + showDelay
+            showTimer = timer(prefetchDelay) { [weak self] in
+                guard let self, generation == self.snapshotGeneration, item.isSame(as: self.hovered) else { return }
+                self.fetchSnapshot(for: item, app: app, generation: generation, previousBoundary: initial?.boundary, showAt: showAt)
+            }
+        }
+    }
+
+    /// 在后台串行队列查一次目标 App 的窗口快照，不阻塞主线程。
+    private func fetchSnapshot(for item: DockItem, app: NSRunningApplication, generation: Int,
+                               previousBoundary: DockPreviewBoundary?, showAt: TimeInterval?) {
+        snapshotQueue.async { [weak self] in
+            let snapshot = WindowIndex.snapshot(of: app)
+            DispatchQueue.main.async {
+                guard let self, generation == self.snapshotGeneration,
+                      self.isEnabled, !self.dockMenuOpen, !app.isTerminated,
+                      item.isSame(as: self.hovered) else { return }
+                guard let snapshot else {
+                    // App 在运行，但这一次没读到它的窗口（它正忙，或者是启动后第一次问它，应答慢了）。
+                    // 鼠标还停在这个图标上的话过一会儿再问，最多再问两次，而不是就此什么都不显示
+                    self.scheduleHide()
+                    if !item.isSame(as: self.retryItem) {
+                        self.retryItem = item
+                        self.retryAttempts = 0
+                    }
+                    if self.retryAttempts < 2 {
+                        self.retryAttempts += 1
+                        log("no answer from \(item.title), retry \(self.retryAttempts)")
+                        self.retryTimer = self.timer(0.4) { [weak self] in
+                            guard let self, generation == self.snapshotGeneration, item.isSame(as: self.hovered) else { return }
+                            self.fetchSnapshot(for: item, app: app, generation: generation, previousBoundary: previousBoundary, showAt: nil)
+                        }
+                    }
+                    return
+                }
+                self.retryItem = nil
+                self.cancelHide()
+                if let showAt {
+                    let remaining = showAt - ProcessInfo.processInfo.systemUptime
+                    if remaining > 0.005 {
+                        self.showTimer = self.timer(remaining) { [weak self] in
+                            guard let self, generation == self.snapshotGeneration, item.isSame(as: self.hovered) else { return }
+                            self.presentWhenReady(item, app: app, snapshot: snapshot, previous: previousBoundary)
+                        }
+                        return
+                    }
+                }
+                self.presentWhenReady(item, app: app, snapshot: snapshot, previous: previousBoundary)
             }
         }
     }
@@ -369,20 +429,23 @@ final class HoverController {
 
     // MARK: 显示与隐藏
 
-    /// 点击多窗口 App 的图标时调用：立即显示，不等悬停延时
+    /// 点击多窗口 App 的图标时调用：立即显示（或保持显示），不等悬停延时
     func showPinned(for item: DockItem, app: NSRunningApplication) {
         showTimer?.invalidate()
+        switchTimer?.invalidate()
+        retryTimer?.invalidate()
         cancelHide()
         hovered = item
-        if let snapshot = WindowIndex.snapshot(of: app) {
-            presentWhenReady(item, app: app, snapshot: snapshot, previous: shownLayout?.boundary)
-        }
+        snapshotGeneration += 1
+        let generation = snapshotGeneration
+        fetchSnapshot(for: item, app: app, generation: generation, previousBoundary: shownLayout?.boundary, showAt: nil)
     }
 
     /// 在图标上点了一下（交给了程序坞去切换、还原，或者我们自己把窗口最小化、放回来了）：
     /// 收起悬停窗，和 Windows 的习惯一致；鼠标离开这个图标之前不再弹
     func dismissAfterClick() {
         showTimer?.invalidate()
+        switchTimer?.invalidate()
         mute(dockItem ?? hovered)
         hide()
     }
@@ -443,12 +506,15 @@ final class HoverController {
     private func reveal(_ layout: Layout) {
         cancelHide()
         guard !panel.isVisible else { return }
-        panel.alphaValue = 0
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        panel.alphaValue = reduceMotion ? 1 : 0
         panel.orderFrontRegardless()
-        panel.playEntrance(from: layout.edge, clearance: isSnug ? snugGap : layout.labelGap, duration: fadeInDuration)
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = fadeInDuration
-            panel.animator().alphaValue = 1
+        if !reduceMotion {
+            panel.playEntrance(from: layout.edge, clearance: isSnug ? snugGap : layout.labelGap, duration: fadeInDuration)
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = fadeInDuration
+                panel.animator().alphaValue = 1
+            }
         }
         trackMouse()
     }
@@ -456,9 +522,13 @@ final class HoverController {
     /// 立刻收起，不淡出。用在点了某个窗口、程序坞的菜单要出来这类「马上让开」的场合
     func hide() {
         showTimer?.invalidate()
+        switchTimer?.invalidate()
+        retryTimer?.invalidate()
         refreshTimer?.invalidate()
         refreshTimer = nil
         refreshFailures = 0
+        refreshInFlight = false
+        snapshotGeneration += 1
         isFading = false
         fadeGeneration += 1
         shown = nil
@@ -486,6 +556,14 @@ final class HoverController {
         let generation = fadeGeneration
         endPeek()
         eraser.stop()
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            // 减弱动态效果时也保留短暂缓冲，防止鼠标边缘微颤立刻关窗，只是不做透明渐变。
+            _ = timer(0.18) { [weak self] in
+                guard let self, self.isFading, self.fadeGeneration == generation else { return }
+                self.hide()
+            }
+            return
+        }
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = fadeOutDuration
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
@@ -500,9 +578,13 @@ final class HoverController {
         guard isFading else { return }
         isFading = false
         fadeGeneration += 1
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.1
-            panel.animator().alphaValue = 1
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            panel.alphaValue = 1
+        } else {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.1
+                panel.animator().alphaValue = 1
+            }
         }
         updateEraser()
     }
@@ -538,11 +620,18 @@ final class HoverController {
     private var showsThumbnails: Bool { wantsThumbnails && Thumbnailer.isAuthorized }
 
     private func entries(for snapshot: AppSnapshot) -> [PreviewEntry] {
-        snapshot.windows.map { window in
+        let pid = snapshot.app.processIdentifier
+        let showActive = snapshot.isFrontmost && !snapshot.isHidden
+        return snapshot.windows.map { window in
             let size = window.frame?.size
-            return PreviewEntry(title: window.title,
+            let active = showActive && window.isMain && !window.isMinimized && window.isOnCurrentSpace
+            return PreviewEntry(id: window.id,
+                                title: window.title,
                                 aspect: size.flatMap { $0.height > 1 ? $0.width / $0.height : nil },
-                                thumbnail: window.id.flatMap { thumbnailCache[$0] })
+                                thumbnail: window.id.flatMap { previewCache.image(for: pid, id: $0) },
+                                isActive: active,
+                                isMinimized: window.isMinimized,
+                                isOnCurrentSpace: window.isOnCurrentSpace)
         }
     }
 
@@ -554,7 +643,8 @@ final class HoverController {
     }
 
     private static func signature(of entries: [PreviewEntry]) -> String {
-        entries.map(\.title).joined(separator: "\n")
+        entries.map { "\($0.id.map(String.init) ?? "-")|\($0.title)|\($0.isActive)|\($0.isMinimized)|\($0.isOnCurrentSpace)" }
+            .joined(separator: "\n")
     }
 
     private typealias Layout = (edge: DockEdge, itemFrame: CGRect, dockFrame: CGRect, visible: CGRect, maxSize: CGSize, labelGap: CGFloat, canBeSnug: Bool, boundary: DockPreviewBoundary?)
@@ -621,39 +711,55 @@ final class HoverController {
     private func refresh() {
         // 顺带再问一次程序坞鼠标停在哪：万一漏了通知，悬停窗不至于一直挂着
         dock.report()
-        guard let current = shown, let layout = shownLayout else { return }
+        guard !refreshInFlight, let current = shown, let layout = shownLayout else { return }
         guard !current.app.isTerminated else {
             hide()
             return
         }
-        guard let snapshot = WindowIndex.snapshot(of: current.app) else {
-            // 偶尔一次读不到就先保持原样，连续三次才认为它真的没法显示了
-            refreshFailures += 1
-            if refreshFailures >= 3 { hide() }
-            return
-        }
-        refreshFailures = 0
-        switch current {
-        case .empty(let item, let app):
-            if !snapshot.windows.isEmpty { present(item, app: app, snapshot: snapshot, layout: layout) }
-        case .windows(let item, let app, _):
-            if snapshot.windows.isEmpty {
-                // 最后一个窗口刚被关掉：换成「没有打开的窗口」那一行
-                present(item, app: app, snapshot: snapshot, layout: layout)
-            } else {
-                shown = .windows(item, app, snapshot)
-                if Self.signature(of: entries(for: snapshot)) != signature {
-                    // 窗口有增减：各项的位置变了，正在预览的那一项可能已经不是原来那扇窗口
-                    endPeek()
-                    render()
-                    loadThumbnails()
+        refreshInFlight = true
+        let targetApp = current.app
+        let targetItem = current.item
+        snapshotQueue.async { [weak self] in
+            let snapshot = WindowIndex.snapshot(of: targetApp)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.refreshInFlight = false
+                guard let live = self.shown, live.item.isSame(as: targetItem), live.app == targetApp else { return }
+                guard !targetApp.isTerminated else {
+                    self.hide()
+                    return
+                }
+                guard let snapshot else {
+                    // 偶尔一次读不到就先保持原样，连续三次才认为它真的没法显示了
+                    self.refreshFailures += 1
+                    if self.refreshFailures >= 3 { self.hide() }
+                    return
+                }
+                self.refreshFailures = 0
+                switch live {
+                case .empty(let item, let app):
+                    if !snapshot.windows.isEmpty { self.present(item, app: app, snapshot: snapshot, layout: layout) }
+                case .windows(let item, let app, _):
+                    if snapshot.windows.isEmpty {
+                        // 最后一个窗口刚被关掉：换成「没有打开的窗口」那一行
+                        self.present(item, app: app, snapshot: snapshot, layout: layout)
+                    } else {
+                        self.shown = .windows(item, app, snapshot)
+                        if Self.signature(of: self.entries(for: snapshot)) != self.signature {
+                            // 窗口有增减或状态变化：各项的位置可能变了，正在预览的那一项可能已经不是原来那扇窗口
+                            self.endPeek()
+                            self.render()
+                            self.loadThumbnails()
+                        }
+                    }
                 }
             }
         }
     }
 
     private func loadThumbnails() {
-        guard showsThumbnails, case .windows(_, _, let snapshot)? = shown else { return }
+        guard showsThumbnails, case .windows(_, let app, let snapshot)? = shown else { return }
+        let pid = app.processIdentifier
         let ids = snapshot.windows.compactMap(\.id)
         guard !ids.isEmpty else { return }
         captureGeneration += 1
@@ -661,9 +767,11 @@ final class HoverController {
         Task { @MainActor [weak self] in
             let images = await Thumbnailer.capture(windowIDs: ids)
             guard let self, generation == self.captureGeneration, !images.isEmpty else { return }
-            if self.thumbnailCache.count > 80 { self.thumbnailCache.removeAll() }
-            self.thumbnailCache.merge(images) { _, new in new }
-            self.render()
+            for (id, image) in images {
+                self.previewCache.set(image, for: pid, id: id)
+            }
+            // 原地替换缩略图，避免整批重建导致闪烁或吞掉正在进行的点击
+            self.panel.updateThumbnails(images)
         }
     }
 
@@ -693,8 +801,15 @@ final class HoverController {
 
     private func showPeek(of window: AppWindow, app: NSRunningApplication) {
         guard panel.isVisible, !isFading, let id = window.id, let frame = window.frame, frame.width > 1, frame.height > 1 else { return }
+        // 已经是当前最前且完整可见的主窗口时，不必再拿一张静态截图盖住实时画面。
+        if app.processIdentifier == NSWorkspace.shared.frontmostApplication?.processIdentifier,
+           !app.isHidden, window.isMain, !window.isMinimized, window.isOnCurrentSpace {
+            if peek.current != nil { peek.dismiss() }
+            return
+        }
         if peek.current != id { log("peek at window \(id) of \(app.localizedName ?? "?")") }
-        peek.show(windowID: id, frame: cocoaRect(fromTopLeft: frame, primaryHeight: primaryScreenHeight), placeholder: thumbnailCache[id])
+        let placeholder = previewCache.image(for: app.processIdentifier, id: id)
+        peek.show(windowID: id, frame: cocoaRect(fromTopLeft: frame, primaryHeight: primaryScreenHeight), placeholder: placeholder)
     }
 
     private func endPeek() {
@@ -712,6 +827,11 @@ final class HoverController {
         windowless.noteReopen(of: app, enabled: showsThumbnails)
     }
 
+    /// 供 ⌘Tab 切换器在没有记录最后关闭窗口时复用程序坞无窗口预览（如保留窗口 / 已学习画面）。
+    func fallbackWindowlessPreview(for app: NSRunningApplication) -> NSImage? {
+        windowless.fallbackPreview(for: app, enabled: Thumbnailer.isAuthorized)
+    }
+
     // MARK: 操作
 
     private func select(_ index: Int) {
@@ -722,6 +842,7 @@ final class HoverController {
         }
         guard case .windows(_, let app, let snapshot)? = shown, snapshot.windows.indices.contains(index) else { return }
         let window = snapshot.windows[index]
+        onWindowFocused?(app, window)
         // 先收起悬停窗，再去切窗口；切窗口不在主线程上做，这样悬停窗一点就消失，不用等窗口的动画
         hide()
         WindowIndex.actions.async { WindowIndex.focus(window, of: app) }
@@ -732,8 +853,15 @@ final class HoverController {
         let window = snapshot.windows[index]
         log("close window \(window.id.map(String.init) ?? "-") of \(app.localizedName ?? "?")")
         endPeek()
-        WindowIndex.actions.async { WindowIndex.close(window) }
-        _ = timer(0.3) { [weak self] in self?.refresh() }
+        panel.content.markClosing(at: index)
+        WindowIndex.actions.async { [weak self] in
+            WindowIndex.close(window, of: app) {
+                // 弹出「是否保存」确认表时立刻收起悬停窗，避免挡住弹窗
+                self?.hide()
+            }
+        }
+        _ = timer(0.25) { [weak self] in self?.refresh() }
+        _ = timer(0.75) { [weak self] in self?.refresh() }
     }
 
     /// 让一个没有窗口的 App 开一个窗口。直接请程序坞执行它自己的「点击图标」动作，效果和用户亲手点一下完全一样。

@@ -1,8 +1,9 @@
 import AppKit
 import MacindowsCore
 
-/// 悬停窗里要展示的一个窗口。不区分它是开着、隐藏还是最小化：对「我要切到哪个窗口」来说这不重要。
+/// 悬停窗里要展示的一个窗口。
 struct PreviewEntry {
+    var id: CGWindowID? = nil
     let title: String
     /// 窗口的宽高比；缩略图还没截到时先按它占位，免得图到了以后版面跳动
     let aspect: CGFloat?
@@ -11,6 +12,10 @@ struct PreviewEntry {
     /// 知道点了以后会出来的那扇窗口长什么样时，thumbnail 就是它的画面，看上去和一扇开着的窗口一样；
     /// 不知道时是一扇空白的窗口，正中是 App 的图标，标题是 App 的名字
     var isPlaceholder = false
+    /// 是否是当前前台正在使用的主窗口
+    var isActive = false
+    var isMinimized = false
+    var isOnCurrentSpace = true
 }
 
 /// 应用从不处于激活状态，按钮必须肯响应「第一次点击」，否则第一下会被系统当成激活窗口用掉
@@ -34,8 +39,9 @@ final class PreviewItemView: NSView {
 
     var onSelect: (() -> Void)?
     var onClose: (() -> Void)?
+    var windowID: CGWindowID? { entry.id }
 
-    private let entry: PreviewEntry
+    private var entry: PreviewEntry
     /// 缩略图可用的最大范围；nil 表示列表行
     private let thumbBound: CGSize?
     private let highlight = NSView()
@@ -43,6 +49,7 @@ final class PreviewItemView: NSView {
     /// 垫在标题底下的底牌，只在缩略图那种版面里用。
     /// 程序坞的玻璃非常透，字直接写在上面，背后一白或者一花就看不清；程序坞自己给图标名称配的也是一个带底色的气泡，这里照做
     private let titleChip = NSView()
+    private let activeDot = NSView()
     private let closeChip = NSView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let thumbView = NSImageView()
@@ -52,6 +59,9 @@ final class PreviewItemView: NSView {
     private let shadowMask = CAShapeLayer()
     /// 鼠标停上来时描在缩略图外面的一圈强调色
     private let ring = NSView()
+    /// 最小化 / 其他桌面 / 空白新建入口的轻量角标
+    private let statusPill = NSView()
+    private let statusIcon = NSImageView()
     private let closeButton = FirstMouseButton()
 
     init(entry: PreviewEntry, thumbBound: CGSize?, placeholder: NSImage?) {
@@ -59,6 +69,7 @@ final class PreviewItemView: NSView {
         self.thumbBound = thumbBound
         super.init(frame: .zero)
         wantsLayer = true
+        toolTip = entry.title
 
         highlight.wantsLayer = true
         highlight.layer?.cornerRadius = 7
@@ -72,6 +83,10 @@ final class PreviewItemView: NSView {
                 addSubview(chip)
             }
             closeChip.isHidden = true
+            activeDot.wantsLayer = true
+            activeDot.layer?.cornerRadius = 2.5
+            activeDot.isHidden = !entry.isActive
+            addSubview(activeDot)
         }
         titleLabel.stringValue = entry.title
         titleLabel.font = Self.titleFont
@@ -111,9 +126,28 @@ final class PreviewItemView: NSView {
             addSubview(thumbShadow)
             addSubview(thumbView)
             addSubview(ring)
+            statusPill.wantsLayer = true
+            statusPill.layer?.cornerRadius = 9
+            statusPill.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
+            statusIcon.symbolConfiguration = .init(pointSize: 10, weight: .semibold)
+            statusIcon.contentTintColor = .white
+            statusIcon.frame = NSRect(x: 3, y: 3, width: 12, height: 12)
+            statusPill.addSubview(statusIcon)
+            configureStatusBadge()
+            addSubview(statusPill)
         } else {
-            icon.image = NSImage(systemSymbolName: entry.isPlaceholder ? "macwindow.badge.plus" : "macwindow", accessibilityDescription: nil)
-            icon.symbolConfiguration = .init(pointSize: 12, weight: .regular)
+            let symbolName: String
+            if entry.isPlaceholder {
+                symbolName = "macwindow.badge.plus"
+            } else if entry.isMinimized {
+                symbolName = "minus.circle"
+            } else if !entry.isOnCurrentSpace {
+                symbolName = "rectangle.on.rectangle"
+            } else {
+                symbolName = "macwindow"
+            }
+            icon.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+            icon.symbolConfiguration = .init(pointSize: 12, weight: entry.isActive ? .semibold : .regular)
             addSubview(icon)
         }
 
@@ -128,6 +162,45 @@ final class PreviewItemView: NSView {
         updateColors()
     }
 
+    private func configureStatusBadge() {
+        let symbol: String?
+        if entry.isPlaceholder, entry.thumbnail == nil {
+            symbol = "plus"
+        } else if entry.isMinimized {
+            symbol = "minus.circle.fill"
+        } else if !entry.isOnCurrentSpace {
+            symbol = "rectangle.on.rectangle"
+        } else {
+            symbol = nil
+        }
+        if let symbol {
+            statusIcon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            statusPill.isHidden = false
+        } else {
+            statusPill.isHidden = true
+        }
+    }
+
+    /// 缩略图异步就绪时原地替换画面，不销毁重建视图，避免闪烁和吞点击。
+    func updateThumbnail(_ image: NSImage) {
+        guard thumbBound != nil else { return }
+        let oldAspect = entry.thumbnail.map { $0.size.width / max($0.size.height, 1) } ?? entry.aspect
+        let newAspect = image.size.width / max(image.size.height, 1)
+        entry.thumbnail = image
+        thumbView.imageScaling = .scaleAxesIndependently
+        thumbView.image = image
+        configureStatusBadge()
+        updateColors()
+        if oldAspect == nil || abs((oldAspect ?? 0) - newAspect) > 0.02 {
+            needsLayout = true
+        }
+    }
+
+    /// 点击关闭后立刻淡化作为视觉反馈，不必干等窗口关闭动画播完。
+    func markClosing() {
+        alphaValue = 0.45
+    }
+
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override var isFlipped: Bool { true }
@@ -137,13 +210,19 @@ final class PreviewItemView: NSView {
         super.layout()
         let width = bounds.width, height = bounds.height
         if let bound = thumbBound {
-            // 标题底牌贴着字的宽度走，放不下时截断；右边给关闭按钮留出位置
+            // 标题底牌贴着字的宽度走，放不下时截断；真实窗口右边给关闭按钮留出位置，无窗口占位卡片不留白
             let chip = Self.chipHeight, top = ((Self.headerHeight - chip) / 2).rounded(), inset: CGFloat = 9
+            let dotSpace: CGFloat = entry.isActive ? 9 : 0
+            let rightReserve: CGFloat = entry.isPlaceholder ? 0 : (chip + 4)
             // 文字控件自己两侧各有 2 点留白，算宽度时要算上，不然刚好放得下的标题也会被截断
             let text = (entry.title as NSString).size(withAttributes: [.font: Self.titleFont]).width.rounded(.up) + 4
-            let chipWidth = max(chip, min(text + (inset - 2) * 2, width - 8 - chip - 4))
+            let chipWidth = max(chip, min(text + dotSpace + (inset - 2) * 2, width - 8 - rightReserve))
             titleChip.frame = NSRect(x: 4, y: top, width: chipWidth, height: chip)
-            titleLabel.frame = NSRect(x: 4 + inset - 2, y: top + (chip - 17) / 2, width: chipWidth - (inset - 2) * 2, height: 17)
+            if entry.isActive {
+                activeDot.frame = NSRect(x: 4 + inset, y: top + (chip - 5) / 2, width: 5, height: 5)
+            }
+            titleLabel.frame = NSRect(x: 4 + inset - 2 + dotSpace, y: top + (chip - 17) / 2,
+                                      width: max(0, chipWidth - (inset - 2) * 2 - dotSpace), height: 17)
             closeChip.frame = NSRect(x: width - 4 - chip, y: top, width: chip, height: chip)
             closeButton.frame = closeChip.frame
             // 每一格大小相同，缩略图按窗口自己的比例缩进这一格里并居中
@@ -155,6 +234,7 @@ final class PreviewItemView: NSView {
             thumbView.frame = frame
             ring.frame = frame.insetBy(dx: -Self.ringWidth, dy: -Self.ringWidth)
             thumbShadow.frame = frame
+            statusPill.frame = NSRect(x: frame.minX + 5, y: max(frame.minY + 5, frame.maxY - 23), width: 18, height: 18)
             let shape = CGPath(roundedRect: NSRect(origin: .zero, size: size), cornerWidth: Self.thumbRadius, cornerHeight: Self.thumbRadius, transform: nil)
             thumbShadow.layer?.shadowPath = shape
             // 遮罩比缩略图大出一圈，中间挖掉缩略图本身
@@ -219,7 +299,7 @@ final class PreviewItemView: NSView {
                 highlight.layer?.backgroundColor = isHighlighted ? NSColor.controlAccentColor.cgColor : NSColor.clear.cgColor
             }
             titleLabel.textColor = isHighlighted ? .white : .labelColor
-            icon.contentTintColor = isHighlighted ? .white : .secondaryLabelColor
+            icon.contentTintColor = isHighlighted ? .white : (entry.isActive ? .controlAccentColor : .secondaryLabelColor)
             closeButton.contentTintColor = isHighlighted ? NSColor.white.withAlphaComponent(0.9) : .secondaryLabelColor
             return
         }
@@ -232,6 +312,7 @@ final class PreviewItemView: NSView {
         closeButton.contentTintColor = dark ? NSColor.white.withAlphaComponent(0.85) : NSColor.black.withAlphaComponent(0.6)
         ring.isHidden = !isHighlighted
         effectiveAppearance.performAsCurrentDrawingAppearance {
+            activeDot.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
             ring.layer?.borderColor = NSColor.controlAccentColor.cgColor
             // 窗口画面常常是一片白，板子在浅色外观下也偏白，只靠一条淡淡的细线分不开，所以描边要实一些，再配上投影
             thumbView.layer?.borderColor = (dark ? NSColor.white.withAlphaComponent(0.22) : NSColor.black.withAlphaComponent(0.26)).cgColor
@@ -367,6 +448,21 @@ final class PreviewContentView: NSView {
         return result
     }
 
+    /// 缩略图异步就绪时原地替换已有条目的画面，不销毁重建视图。
+    func updateThumbnails(_ images: [CGWindowID: NSImage]) {
+        guard !isList else { return }
+        for item in items {
+            if let id = item.windowID, let image = images[id] {
+                item.updateThumbnail(image)
+            }
+        }
+    }
+
+    func markClosing(at index: Int) {
+        guard items.indices.contains(index) else { return }
+        items[index].markClosing()
+    }
+
     // MARK: 鼠标悬停的高亮
     //
     // 不依赖每个条目各自的「进入 / 离开」事件：那种事件只在越过边界的一刻触发，条目一重建或鼠标移动得快就会漏。
@@ -374,11 +470,20 @@ final class PreviewContentView: NSView {
 
     /// point 是窗口坐标；传 nil 表示鼠标不在这里
     func updateHover(windowPoint: NSPoint?) {
-        let point = windowPoint.map { convert($0, from: nil) }
+        let pointInSelf = windowPoint.map { convert($0, from: nil) }
+        let scroll = extras.first as? NSScrollView
+        let insideViewport = scroll.map { clip in pointInSelf.map { clip.frame.contains($0) } ?? false } ?? true
         var index: Int?
         for (offset, item) in items.enumerated() {
-            item.isHighlighted = point.map { item.frame.contains($0) } ?? false
-            if item.isHighlighted { index = offset }
+            let hit: Bool
+            if insideViewport, let windowPoint {
+                let local = item.convert(windowPoint, from: nil)
+                hit = item.bounds.contains(local)
+            } else {
+                hit = false
+            }
+            item.isHighlighted = hit
+            if hit { index = offset }
         }
         if index != highlightedIndex {
             highlightedIndex = index
@@ -429,36 +534,54 @@ final class PreviewContentView: NSView {
         return NSSize(width: x - Self.spacing + Self.padding, height: cell.height + Self.padding * 2)
     }
 
-    private func layoutRows(_ entries: [PreviewEntry], maxSize: CGSize) -> NSSize {
-        // 屏幕放不下全部行时，只显示放得下的，并在末尾注明还有多少个
-        let capacity = max(1, Int((maxSize.height - Self.padding * 2) / PreviewItemView.rowHeight))
-        let visible = entries.count > capacity ? Array(entries.prefix(capacity - 1)) : entries
-        let remaining = entries.count - visible.count
+    private final class FlippedDocumentView: NSView {
+        override var isFlipped: Bool { true }
+    }
 
+    private func layoutRows(_ entries: [PreviewEntry], maxSize: CGSize) -> NSSize {
         // 宽度跟着最长的标题走，但有上下限
         var widest: CGFloat = 0
-        for entry in visible {
+        for entry in entries {
             widest = max(widest, (entry.title as NSString).size(withAttributes: [.font: PreviewItemView.titleFont]).width + 62)
         }
         let rowWidth = min(max(widest.rounded(.up) + 4, 220), min(420, maxSize.width - Self.padding * 2))
-        var y = Self.padding
-        for entry in visible {
+        let totalHeight = CGFloat(entries.count) * PreviewItemView.rowHeight
+        let maxContentHeight = max(PreviewItemView.rowHeight, maxSize.height - Self.padding * 2)
+
+        if totalHeight <= maxContentHeight {
+            var y = Self.padding
+            for entry in entries {
+                let item = PreviewItemView(entry: entry, thumbBound: nil, placeholder: nil)
+                item.frame = NSRect(x: Self.padding, y: y, width: rowWidth, height: PreviewItemView.rowHeight)
+                addSubview(item)
+                items.append(item)
+                y += PreviewItemView.rowHeight
+            }
+            return NSSize(width: rowWidth + Self.padding * 2, height: y + Self.padding)
+        }
+
+        // 超出屏幕高度时改为可滚动列表，所有窗口都可达，不截断隐藏。
+        let visibleHeight = floor(maxContentHeight / PreviewItemView.rowHeight) * PreviewItemView.rowHeight
+        let scroll = NSScrollView(frame: NSRect(x: Self.padding, y: Self.padding, width: rowWidth, height: visibleHeight))
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
+        let document = FlippedDocumentView(frame: NSRect(x: 0, y: 0, width: rowWidth, height: totalHeight))
+        var y: CGFloat = 0
+        for entry in entries {
             let item = PreviewItemView(entry: entry, thumbBound: nil, placeholder: nil)
-            item.frame = NSRect(x: Self.padding, y: y, width: rowWidth, height: PreviewItemView.rowHeight)
-            addSubview(item)
+            item.frame = NSRect(x: 0, y: y, width: rowWidth, height: PreviewItemView.rowHeight)
+            document.addSubview(item)
             items.append(item)
             y += PreviewItemView.rowHeight
         }
-        if remaining > 0 {
-            let more = NSTextField(labelWithString: remaining == 1 ? L("还有 1 个窗口") : String(format: L("还有 %d 个窗口"), remaining))
-            more.font = .systemFont(ofSize: 12)
-            more.textColor = .secondaryLabelColor
-            more.frame = NSRect(x: Self.padding + 32, y: y + 6, width: rowWidth - 40, height: 16)
-            addSubview(more)
-            extras = [more]
-            y += PreviewItemView.rowHeight
-        }
-        return NSSize(width: rowWidth + Self.padding * 2, height: y + Self.padding)
+        scroll.documentView = document
+        addSubview(scroll)
+        extras = [scroll]
+        return NSSize(width: rowWidth + Self.padding * 2, height: visibleHeight + Self.padding * 2)
     }
 }
 
@@ -520,7 +643,7 @@ final class PreviewPanel: NSPanel {
 
     /// 出现时从程序坞那一侧滑出来一小段。只挪画面，窗口本身已经在最终的位置上，鼠标该点哪还是点哪
     func playEntrance(from edge: DockEdge, clearance: CGFloat = 7, duration: TimeInterval) {
-        guard let layer = root.layer else { return }
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, let layer = root.layer else { return }
         let distance: CGFloat = min(7, clearance)
         let offset: CGSize
         switch edge {
@@ -562,6 +685,10 @@ final class PreviewPanel: NSPanel {
         let size = content.configure(entries: entries, thumbnails: thumbnails, placeholder: placeholder, maxSize: maxSize)
         useGlass(dock: !content.isList)
         return apply(size, cornerRadius: 20)
+    }
+
+    func updateThumbnails(_ images: [CGWindowID: NSImage]) {
+        content.updateThumbnails(images)
     }
 
     private func apply(_ size: NSSize, cornerRadius: CGFloat) -> NSSize {

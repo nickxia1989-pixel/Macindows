@@ -19,14 +19,18 @@ public struct AppWindowState: Equatable {
     public var minimizedCount: Int
     /// 不在当前桌面上的窗口数量（在别的桌面，或者各自全屏）
     public var elsewhereCount: Int
+    /// 唯一的窗口能否被最小化（原生全屏窗口、禁用最小化按钮的对话框不能）
+    public var canMinimize: Bool
 
-    public init(isRunning: Bool, isFrontmost: Bool, isHidden: Bool, windowCount: Int, minimizedCount: Int, elsewhereCount: Int = 0) {
+    public init(isRunning: Bool, isFrontmost: Bool, isHidden: Bool, windowCount: Int, minimizedCount: Int,
+                elsewhereCount: Int = 0, canMinimize: Bool = true) {
         self.isRunning = isRunning
         self.isFrontmost = isFrontmost
         self.isHidden = isHidden
         self.windowCount = windowCount
         self.minimizedCount = minimizedCount
         self.elsewhereCount = elsewhereCount
+        self.canMinimize = canMinimize
     }
 }
 
@@ -43,5 +47,5 @@ public func dockClickAction(for s: AppWindowState) -> DockClickAction {
     if s.minimizedCount >= 1 { return .restoreWindow }
     // 唯一的窗口在别的桌面上：点图标是想过去看它，程序坞会切过去。这时哪怕 App 算「最前」，也不能把一扇看不见的窗口最小化掉
     if s.elsewhereCount >= 1 { return .passThrough }
-    return s.isFrontmost ? .minimizeWindow : .passThrough
+    return s.isFrontmost && s.canMinimize ? .minimizeWindow : .passThrough
 }

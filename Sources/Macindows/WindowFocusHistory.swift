@@ -107,6 +107,13 @@ final class WindowFocusHistory {
     }
 
     var ranks: [SwitcherWindowKey: Int] {
-        Dictionary(uniqueKeysWithValues: recent.enumerated().map { ($0.element, $0.offset) })
+        var ranks: [SwitcherWindowKey: Int] = [:]
+        for (rank, key) in recent.enumerated() {
+            if ranks[key] == nil { ranks[key] = rank }
+            if case .numbered(let pid, _) = key, ranks[.application(pid)] == nil {
+                ranks[.application(pid)] = rank
+            }
+        }
+        return ranks
     }
 }

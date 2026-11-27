@@ -7,19 +7,14 @@ final class SwitcherLayoutTests: XCTestCase {
     private let portrait = CGSize(width: 500, height: 900)
     private let square = CGSize(width: 800, height: 800)
 
-    func testAppRowStaysBelowEveryWindowPageAndFitsTheScreen() {
-        let sizes = Array<CGSize?>(repeating: landscape, count: 95)
-        let screen = CGSize(width: 900, height: 600)
-        let layout = SwitcherLayout(windowSizes: sizes, screenSize: screen, applicationCount: 22)
-        XCTAssertEqual(layout.pages.flatMap { $0 }, Array(sizes.indices))
-        XCTAssertTrue(layout.frames.allSatisfy { $0.maxY < layout.applicationStrip.minY })
-        XCTAssertTrue(CGRect(origin: .zero, size: layout.size).contains(layout.applicationStrip))
-        XCTAssertTrue(CGRect(origin: .zero, size: screen).contains(CGRect(origin: .zero, size: layout.size)))
-        let apps = SwitcherLayout(windowSizes: [], screenSize: laptop, applicationCount: 12)
-        XCTAssertTrue(apps.pages.isEmpty)
-        XCTAssertTrue(apps.frames.isEmpty)
-        XCTAssertGreaterThanOrEqual(apps.applicationStrip.width, 9 * SwitcherLayout.appCardSize.width + 8 * SwitcherLayout.appGap)
-        XCTAssertTrue(SwitcherLayout(windowSizes: sizes, screenSize: screen).applicationStrip.isEmpty)
+    func testPlaceholdersUseWindowCellsAndOnlyAnEmptyListHasNoPage() {
+        let sizes: [CGSize?] = [nil, portrait, nil, landscape, nil]
+        let layout = SwitcherLayout(windowSizes: sizes, screenSize: laptop)
+        XCTAssertEqual(layout.pages, [0..<sizes.count])
+        XCTAssertEqual(layout.frames.count, sizes.count)
+        XCTAssertEqual(layout.frames[0].height, layout.frames[1].height)
+        XCTAssertEqual(layout.frames[2].size, layout.frames[4].size)
+        XCTAssertTrue(SwitcherLayout(windowSizes: [], screenSize: laptop).pages.isEmpty)
     }
 
     func testFitsBeyondEightAndShrinksAsWindowsAccumulate() {
@@ -91,5 +86,36 @@ final class SwitcherLayoutTests: XCTestCase {
         }
         let actual = SwitcherLayout.pictureFrame(for: portrait, in: card)
         XCTAssertLessThan(actual.width, actual.height)
+    }
+
+    func testDirectionalNeighborMovesAcrossRowsAndPages() {
+        let sizes = Array<CGSize?>(repeating: landscape, count: 14)
+        let layout = SwitcherLayout(windowSizes: sizes, screenSize: laptop)
+        XCTAssertEqual(layout.neighbor(from: 0, direction: .right), 1)
+        XCTAssertEqual(layout.neighbor(from: 0, direction: .left), 13)
+        XCTAssertEqual(layout.neighbor(from: 13, direction: .right), 0)
+
+        // 向下应移动到更低的一行，且水平位置接近
+        let down = layout.neighbor(from: 0, direction: .down)
+        XCTAssertNotNil(down)
+        if let down {
+            XCTAssertGreaterThan(layout.frames[down].minY, layout.frames[0].minY)
+            // 再向上应回到第 0 行
+            let backUp = layout.neighbor(from: down, direction: .up)
+            XCTAssertNotNil(backUp)
+            if let backUp {
+                XCTAssertEqual(layout.frames[backUp].minY, layout.frames[0].minY)
+            }
+        }
+
+        // 多页场景：在第一页最底行按向下应进入第二页首行
+        let many = SwitcherLayout(windowSizes: Array<CGSize?>(repeating: landscape, count: 60), screenSize: laptop)
+        XCTAssertGreaterThan(many.pages.count, 1)
+        let lastOnFirstPage = many.pages[0].upperBound - 1
+        let nextPageCard = many.neighbor(from: lastOnFirstPage, direction: .down)
+        XCTAssertNotNil(nextPageCard)
+        if let nextPageCard {
+            XCTAssertTrue(many.pages[1].contains(nextPageCard))
+        }
     }
 }

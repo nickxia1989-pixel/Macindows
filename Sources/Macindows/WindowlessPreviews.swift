@@ -8,6 +8,8 @@ import MacindowsCore
 /// App 每次都开一扇新的，用它上一次新开的那扇（见 noteReopen）；都不知道时是一扇空白的窗口。
 /// 学到的画面只存在内存里。
 final class WindowlessPreviews {
+    /// 外部来源的兜底预览（例如 ⌘Tab 切换器在最后一扇窗口关闭前缓存的画面）
+    var externalPreview: ((NSRunningApplication) -> NSImage?)?
     /// 各个 App 上一次「重新打开」时新开出来的那扇窗口的画面和标题，键是 App 的标识
     private var learned: [String: (image: NSImage, title: String)] = [:]
     /// 留着的窗口点了之后并没有回来的 App：以后不再拿留着的窗口当预览
@@ -56,7 +58,8 @@ final class WindowlessPreviews {
         let blank = PreviewEntry(title: name, aspect: nil, thumbnail: nil, isPlaceholder: true)
         guard enabled else { return (blank, "blank") }
         let key = Self.key(of: app)
-        if !keptMisleads.contains(key), let kept = WindowIndex.keptWindows(of: app).first, let image = PrivateAPI.captureWindow(kept.id) {
+        if !keptMisleads.contains(key), let kept = WindowIndex.keptWindows(of: app).first,
+           let image = PrivateAPI.captureWindow(kept.id) {
             shownKept[key] = kept.id
             return (PreviewEntry(title: kept.title, aspect: nil, thumbnail: Self.picture(image), isPlaceholder: true), "kept window")
         }
@@ -64,7 +67,21 @@ final class WindowlessPreviews {
         if let learned = learned[key] {
             return (PreviewEntry(title: learned.title, aspect: nil, thumbnail: learned.image, isPlaceholder: true), "learned new window")
         }
+        if let image = externalPreview?(app) {
+            return (PreviewEntry(title: name, aspect: nil, thumbnail: image, isPlaceholder: true), "switcher cached window")
+        }
         return (blank, "blank")
+    }
+
+    /// 给 ⌘Tab 切换器在没有观察到关闭历史时的兜底预览：优先已学习的画面，再试窗口服务器里留着的那扇。
+    func fallbackPreview(for app: NSRunningApplication, enabled: Bool) -> NSImage? {
+        guard enabled else { return nil }
+        let key = Self.key(of: app)
+        if !keptMisleads.contains(key), let kept = WindowIndex.keptWindows(of: app).first,
+           let image = PrivateAPI.captureWindow(kept.id) {
+            return Self.picture(image)
+        }
+        return learned[key]?.image
     }
 
     // MARK: 学新开的窗口
@@ -239,7 +256,8 @@ final class WindowlessPreviews {
     }
 
     private static func picture(_ image: CGImage) -> NSImage {
-        NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+        let scaled = Thumbnailer.downscale(image, longestSide: 960)
+        return NSImage(cgImage: scaled, size: NSSize(width: scaled.width, height: scaled.height))
     }
 
     private func keep(_ image: NSImage, for watch: Watch, how: String) {

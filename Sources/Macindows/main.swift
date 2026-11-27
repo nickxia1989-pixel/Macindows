@@ -31,9 +31,25 @@ if arguments.contains("--diagnose") {
     exit(0)
 }
 
-// 同时跑两份会各自截一遍点击，直接让后来的那份退出
+// 从菜单栏触发重启时，先等旧进程退出再继续启动，避免被单实例检查拦掉
+if let index = arguments.firstIndex(of: "--relaunch"),
+   arguments.indices.contains(index + 1),
+   let oldPID = pid_t(arguments[index + 1]) {
+    let deadline = Date().addingTimeInterval(3)
+    while Date() < deadline, NSRunningApplication(processIdentifier: oldPID) != nil {
+        Thread.sleep(forTimeInterval: 0.05)
+    }
+}
+
+// 同时跑两份会各自截一遍点击；重复打开时通知已有实例展开菜单栏菜单，让用户立刻看到它已在运行
 if let bundleID = Bundle.main.bundleIdentifier,
    NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).count > 1 {
+    DistributedNotificationCenter.default().postNotificationName(
+        Notification.Name("com.xianing.Macindows.reopen"),
+        object: bundleID,
+        userInfo: nil,
+        deliverImmediately: true
+    )
     exit(0)
 }
 

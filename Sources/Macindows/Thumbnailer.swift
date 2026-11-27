@@ -96,12 +96,13 @@ enum Thumbnailer {
     }
 
     /// 窗口服务器返回的是原图。保留缩略图时先缩小，避免一页最小化窗口占用多张原图的内存。
-    static func windowServerThumbnail(_ id: CGWindowID, longestSide: CGFloat) -> CGImage? {
-        guard isAuthorized, let image = PrivateAPI.captureWindow(id) else { return nil }
-        return thumbnail(image, longestSide: longestSide)
+    /// highResolution 为真时按屏幕原生分辨率抓取后再缩小，在 Retina 大卡片上不发糊。
+    static func windowServerThumbnail(_ id: CGWindowID, longestSide: CGFloat, highResolution: Bool = false) -> CGImage? {
+        guard isAuthorized, let image = PrivateAPI.captureWindow(id, fullResolution: highResolution) else { return nil }
+        return downscale(image, longestSide: longestSide)
     }
 
-    private static func thumbnail(_ image: CGImage, longestSide: CGFloat) -> CGImage {
+    static func downscale(_ image: CGImage, longestSide: CGFloat) -> CGImage {
         let scale = longestSide / CGFloat(max(image.width, image.height))
         guard scale < 1,
               let context = CGContext(data: nil, width: max(1, Int((CGFloat(image.width) * scale).rounded())),
@@ -111,5 +112,9 @@ enum Thumbnailer {
         context.interpolationQuality = .high
         context.draw(image, in: CGRect(x: 0, y: 0, width: context.width, height: context.height))
         return context.makeImage() ?? image
+    }
+
+    private static func thumbnail(_ image: CGImage, longestSide: CGFloat) -> CGImage {
+        downscale(image, longestSide: longestSide)
     }
 }

@@ -63,9 +63,9 @@ Right-click menus and the Dock's other built-in interactions are still handled b
 
 Enable **Switch Windows with ⌘Tab** from the four-pane menu bar icon. It is off by default. Hold ⌘ and press Tab to see a centered grid on the display containing the pointer. Each window has its own proportionally sized thumbnail, title and app icon badge, including other windows of the same app and minimized windows. Cards grow or shrink to fit the screen. Additional pages appear only when the previews would otherwise become too small to recognize.
 
-- After you close an app’s last window, it appears in **Apps without windows** at the bottom. While the switcher is visible, press the number shown on an app (**1–9**, number row or keypad) to open it immediately.
-- Hold ⌘ and press ↓ to enter the app row. Use Tab or ⇧Tab to select an app and release ⌘ to open it. Press ↑ to return to the previously selected window. You can also click any app, including those beyond the first nine.
-- Visible, hidden and minimized windows share one most-recently-used order. Windows without an observed focus event start in newest-created order.
+- Visible, minimized and hidden windows share one most-recently-used order with running apps whose windows have all been closed. Entries without focus history are ordered by app launch time, then by newest window within the same app.
+- A running app with no windows shows its name and the last available preview of its final closed window. If no preview is available, its icon appears inside a window outline. Release ⌘ on the card or click it to reopen the app.
+- The first nine windowless apps in the list have a **1–9** shortcut at the top left of their cards. Press the matching number on the number row or keypad while the switcher is visible to open the app.
 - When an app has a numeric Dock badge, each of its window cards shows that number in a red badge at the top right. Counts refresh when you open the switcher.
 - Tap ⌘Tab to switch back. Keep holding ⌘ and press Tab or ⇧Tab to cycle forward or backward, across pages if needed.
 - Release ⌘ or click a card to focus that window. Minimized windows are restored automatically. Press Esc to cancel.

@@ -16,6 +16,10 @@ final class ClickPolicyTests: XCTestCase {
 
     func testSingleWindowFrontmostGetsMinimized() {
         XCTAssertEqual(dockClickAction(for: state(front: true, windows: 1)), .minimizeWindow)
+        // 原生全屏窗口或不可最小化的对话框不截下点击
+        let nonMinimizable = AppWindowState(isRunning: true, isFrontmost: true, isHidden: false,
+                                            windowCount: 1, minimizedCount: 0, canMinimize: false)
+        XCTAssertEqual(dockClickAction(for: nonMinimizable), .passThrough)
     }
 
     func testSingleWindowInBackgroundIsActivatedByTheDock() {

@@ -25,6 +25,7 @@ final class ClickInterceptor {
     private let lock = NSLock()
     private var pending: (down: CGEvent, location: CGPoint, action: () -> Void, serial: Int)?
     private var serial = 0
+    private var stopping = false
     /// 给我们自己补发的事件打的记号，避免再被自己截住
     private static let marker: Int64 = 0x484F_525A
 
@@ -33,6 +34,7 @@ final class ClickInterceptor {
     @discardableResult
     func start() -> Bool {
         guard tap == nil else { return true }
+        lock.withLock { stopping = false }
         let types: [CGEventType] = [.leftMouseDown, .leftMouseUp, .leftMouseDragged, .rightMouseDown]
         let mask = types.reduce(CGEventMask(0)) { $0 | CGEventMask(1 << $1.rawValue) }
         let callback: CGEventTapCallBack = { _, type, event, refcon in
@@ -64,13 +66,13 @@ final class ClickInterceptor {
     }
 
     func stop() {
+        lock.withLock { stopping = true }
         release(repost: false)
-        if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
+        if let tap { CFMachPortInvalidate(tap) }
         if let runLoop {
             if let source { CFRunLoopRemoveSource(runLoop, source, .commonModes) }
             CFRunLoopStop(runLoop)
         }
-        if let tap { CFMachPortInvalidate(tap) }
         tap = nil
         source = nil
         runLoop = nil
@@ -78,7 +80,12 @@ final class ClickInterceptor {
 
     /// 系统嫌我们处理得慢、或者用户按了安全键时会停用监听。回调里会重新打开；这里给外面一个定时检查的入口，以防万一
     func reviveIfNeeded() {
-        guard let tap, !CGEvent.tapIsEnabled(tap: tap) else { return }
+        guard !lock.withLock({ stopping }) else { return }
+        guard let tap else {
+            if Accessibility.isTrusted, start() { log("event tap recreated on health check") }
+            return
+        }
+        guard !CGEvent.tapIsEnabled(tap: tap) else { return }
         log("event tap found disabled, re-enabling")
         CGEvent.tapEnable(tap: tap, enable: true)
     }
@@ -86,6 +93,7 @@ final class ClickInterceptor {
     /// 返回 true 表示吞掉这个事件
     private func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            guard !lock.withLock({ stopping }) else { return false }
             log("event tap disabled (\(type.rawValue)), re-enabling")
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             return false
@@ -111,7 +119,7 @@ final class ClickInterceptor {
             pending = (copy, location, action, current)
             lock.unlock()
             // 按住不放是在叫出程序坞自己的菜单：把按下事件还给程序坞
-            DispatchQueue.global(qos: .userInteractive).asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            DispatchQueue.global(qos: .userInteractive).asyncAfter(deadline: .now() + 0.42) { [weak self] in
                 self?.release(repost: true, onlyIf: current)
             }
             return true
@@ -123,7 +131,7 @@ final class ClickInterceptor {
             // 按下之后鼠标被拖动了：用户是在拖图标（调整顺序、拖出程序坞），把按下事件还给程序坞。
             // 触发这一步的这个拖动事件本身吞掉，免得它比补发的按下先到
             lock.lock()
-            let moved = pending.map { hypot(location.x - $0.location.x, location.y - $0.location.y) > 5 } ?? false
+            let moved = pending.map { hypot(location.x - $0.location.x, location.y - $0.location.y) > 8 } ?? false
             lock.unlock()
             guard moved else { return false }
             release(repost: true)

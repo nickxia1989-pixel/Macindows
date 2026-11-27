@@ -13,10 +13,15 @@ struct AppWindow {
     let frame: CGRect?
     /// 是不是在当前桌面上。在别的桌面上（包括各自全屏的窗口）时为 false
     let isOnCurrentSpace: Bool
+    /// 是否处于原生全屏状态
+    let isFullScreen: Bool
+    /// 是否支持最小化（全屏窗口或禁用最小化按钮的窗口为 false）
+    let canMinimize: Bool
 
     /// 同一扇窗口，换个最小化状态
     func with(minimized: Bool) -> AppWindow {
-        AppWindow(element: element, id: id, title: title, isMinimized: minimized, isMain: isMain, frame: frame, isOnCurrentSpace: isOnCurrentSpace)
+        AppWindow(element: element, id: id, title: title, isMinimized: minimized, isMain: isMain,
+                  frame: frame, isOnCurrentSpace: isOnCurrentSpace, isFullScreen: isFullScreen, canMinimize: canMinimize)
     }
 }
 
@@ -30,14 +35,29 @@ struct AppSnapshot {
     var state: AppWindowState {
         AppWindowState(isRunning: !app.isTerminated, isFrontmost: isFrontmost, isHidden: isHidden,
                        windowCount: windows.count, minimizedCount: windows.filter(\.isMinimized).count,
-                       elsewhereCount: windows.filter { !$0.isOnCurrentSpace && !$0.isMinimized }.count)
+                       elsewhereCount: windows.filter { !$0.isOnCurrentSpace && !$0.isMinimized }.count,
+                       canMinimize: windows.count == 1 ? windows[0].canMinimize : true)
     }
 }
 
 enum WindowIndex {
+    /// 批量枚举多个应用时共用一份桌面布局和窗口列表快照，避免每个应用重复向窗口服务器查询。
+    struct SnapshotContext {
+        let spaceLayout: PrivateAPI.SpaceLayout?
+        let windowList: [[String: Any]]?
+
+        static func capture() -> SnapshotContext {
+            let layout = PrivateAPI.spaceLayout()
+            let list = layout?.hasInactiveSpaces == true
+                ? (CGWindowListCopyWindowInfo([.excludeDesktopElements], kCGNullWindowID) as? [[String: Any]])
+                : nil
+            return SnapshotContext(spaceLayout: layout, windowList: list)
+        }
+    }
+
     /// 列出一个 App 的全部窗口：开着的、隐藏的、最小化的，以及别的桌面上的。
     /// 读不到（App 正忙、刚启动，或者卡住了）时返回 nil。可以在任何线程调用。
-    static func snapshot(of app: NSRunningApplication) -> AppSnapshot? {
+    static func snapshot(of app: NSRunningApplication, context: SnapshotContext? = nil) -> AppSnapshot? {
         guard !app.isTerminated else { return nil }
         let pid = app.processIdentifier
         guard !AXHealth.isBackedOff(pid) else { return nil }
@@ -52,11 +72,11 @@ enum WindowIndex {
         }
         AXHealth.noteAnswer(pid)
 
-        let layout = PrivateAPI.spaceLayout()
+        let layout = context?.spaceLayout ?? PrivateAPI.spaceLayout()
         var windows = raw.filter { CFGetTypeID($0) == AXUIElementGetTypeID() }.compactMap { makeWindow($0 as! AXUIElement, of: app, layout: layout) }
         // 系统给的列表里只有当前桌面上的窗口和最小化的窗口。还有别的桌面时，那边的窗口要另外去找
         if let layout, layout.hasInactiveSpaces {
-            windows += windowsOnOtherSpaces(of: app, known: Set(windows.compactMap(\.id)), layout: layout)
+            windows += windowsOnOtherSpaces(of: app, known: Set(windows.compactMap(\.id)), layout: layout, windowList: context?.windowList)
         }
         // 顺序固定为窗口打开的先后（系统窗口号递增），和 Windows 任务栏一致。
         // 系统给的是前后层次的顺序，每切一次窗口就会变，不能直接用。
@@ -69,8 +89,8 @@ enum WindowIndex {
     }
 
     /// 把辅助功能里的一个窗口元素读成 AppWindow；不该列出来的返回 nil
-    private static func makeWindow(_ window: AXUIElement, of app: NSRunningApplication, layout: PrivateAPI.SpaceLayout?,
-                                   onCurrentSpace: Bool? = nil) -> AppWindow? {
+    static func makeWindow(_ window: AXUIElement, of app: NSRunningApplication, layout: PrivateAPI.SpaceLayout?,
+                           onCurrentSpace: Bool? = nil) -> AppWindow? {
         let id = PrivateAPI.windowID(of: window)
         let frame = window.frame
         let title = window.string(kAXTitleAttribute) ?? ""
@@ -82,17 +102,21 @@ enum WindowIndex {
         if onCurrentSpace == nil, let layout, layout.hasInactiveSpaces, let id {
             current = layout.isOnCurrentSpace(PrivateAPI.spaces(of: id))
         }
+        let fullScreen = window.bool("AXFullScreen") ?? false
+        let canMinimize = !fullScreen && window.isSettable(kAXMinimizedAttribute)
         return AppWindow(element: window, id: id,
                          title: title.isEmpty ? (app.localizedName ?? "") : title,
                          isMinimized: window.bool(kAXMinimizedAttribute) ?? false,
                          isMain: window.bool(kAXMainAttribute) ?? false,
-                         frame: frame, isOnCurrentSpace: current)
+                         frame: frame, isOnCurrentSpace: current,
+                         isFullScreen: fullScreen, canMinimize: canMinimize)
     }
 
     /// 这个 App 在别的桌面上的窗口。先看窗口服务器那边有没有这样的窗口，有才去辅助功能里逐个编号找。
-    private static func windowsOnOtherSpaces(of app: NSRunningApplication, known: Set<CGWindowID>, layout: PrivateAPI.SpaceLayout) -> [AppWindow] {
+    private static func windowsOnOtherSpaces(of app: NSRunningApplication, known: Set<CGWindowID>,
+                                             layout: PrivateAPI.SpaceLayout, windowList: [[String: Any]]? = nil) -> [AppWindow] {
         let pid = app.processIdentifier
-        let all = CGWindowListCopyWindowInfo([.excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        let all = windowList ?? (CGWindowListCopyWindowInfo([.excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? [])
         // 窗口服务器给的顺序是从前到后，记下来：一组标签页里留排在最前的那个
         var order: [CGWindowID: Int] = [:]
         for info in all where (info[kCGWindowOwnerPID as String] as? pid_t) == pid && (info[kCGWindowLayer as String] as? Int) == 0 {
@@ -107,7 +131,7 @@ enum WindowIndex {
         guard !order.isEmpty else { return [] }
 
         var found: [(rank: Int, window: AppWindow)] = []
-        for element in PrivateAPI.windowElements(pid: pid) {
+        for element in PrivateAPI.windowElements(pid: pid, wantedIDs: Set(order.keys)) {
             guard let id = PrivateAPI.windowID(of: element), let rank = order[id], !found.contains(where: { $0.window.id == id }),
                   let window = makeWindow(element, of: app, layout: layout, onCurrentSpace: false) else { continue }
             found.append((rank, window))
@@ -187,10 +211,38 @@ enum WindowIndex {
         }
     }
 
-    /// 同样要放到 actions 上执行：App 弹出「是否保存」之类的对话框时，这一步也可能迟迟不返回
-    static func close(_ window: AppWindow) {
+    /// 同样要放到 actions 上执行：App 弹出「是否保存」之类的对话框时，这一步也可能迟迟不返回。
+    /// 若最小化窗口无法直接点关闭按钮，先还原再关；若触发了保存确认表（AXSheet），主动把窗口带到前台。
+    static func close(_ window: AppWindow, of app: NSRunningApplication? = nil, onSheet: (() -> Void)? = nil) {
+        var pressed = false
         if let button = window.element.element(kAXCloseButtonAttribute) {
-            button.perform(kAXPressAction)
+            pressed = button.perform(kAXPressAction)
         }
+        if !pressed, window.isMinimized {
+            window.element.set(kAXMinimizedAttribute, kCFBooleanFalse)
+            Thread.sleep(forTimeInterval: 0.15)
+            if let button = window.element.element(kAXCloseButtonAttribute) {
+                pressed = button.perform(kAXPressAction)
+            }
+        }
+        guard pressed, let app, !app.isTerminated else { return }
+        Thread.sleep(forTimeInterval: 0.12)
+        let hasSheet = window.element.elements(kAXChildrenAttribute).contains {
+            $0.string(kAXRoleAttribute) == kAXSheetRole
+        }
+        if hasSheet {
+            focus(window.with(minimized: false), of: app)
+            if let onSheet { DispatchQueue.main.async(execute: onSheet) }
+        }
+    }
+
+    static func hide(_ app: NSRunningApplication) {
+        guard !app.isTerminated else { return }
+        app.hide()
+    }
+
+    static func quit(_ app: NSRunningApplication) {
+        guard !app.isTerminated else { return }
+        app.terminate()
     }
 }

@@ -9,7 +9,7 @@ final class WindowSwitcher {
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
         var cycle: WindowCycle
         var entries: [SwitcherEntry] = []
-        var numberedEntries: [Int] = []
+        var visiblePage: Range<Int> = 0..<0
         var appBadges: [String: String] = [:]
         var pendingApps: [pid_t: NSRunningApplication] = [:]
         var deadlineTimer: Timer?
@@ -75,9 +75,10 @@ final class WindowSwitcher {
         panel.onPick = { [weak self] in self?.pick($0) }
         panel.onClose = { [weak self] in self?.closeEntry(at: $0) }
         panel.onTurnPage = { [weak self] delta in self?.turnPage(by: delta) }
-        panel.onReveal = { [weak self] in
+        panel.onPageChange = { [weak self] range in
             guard let self, let session = self.session else { return }
-            self.shortcut?.panelDidShow(for: session.gesture, applicationCount: session.numberedEntries.count)
+            session.visiblePage = range
+            self.shortcut?.panelDidShow(for: session.gesture, shortcutCount: min(9, range.count))
         }
         self.panel = panel
         history.onFocus = { [weak panel] key in panel?.focusPreview(key) }
@@ -144,10 +145,11 @@ final class WindowSwitcher {
             update(session)
         case .cancel:
             if session?.gesture == gesture { dismiss() }
-        case .openApplication(let i):
-            guard let session, session.gesture == gesture, panel?.isVisible == true,
-                  session.numberedEntries.indices.contains(i) else { return }
-            pick(session.numberedEntries[i])
+        case .selectShortcut(let offset):
+            guard let session, session.gesture == gesture, panel?.isVisible == true else { return }
+            let target = session.visiblePage.lowerBound + offset
+            guard session.visiblePage.contains(target), session.entries.indices.contains(target) else { return }
+            pick(target)
         }
     }
 
@@ -268,17 +270,6 @@ final class WindowSwitcher {
             session.entries.insert(entry, at: 0)
             session.hasCurrent = true
         }
-        assignShortcutNumbers(in: session)
-    }
-
-    private func assignShortcutNumbers(in session: Session) {
-        for i in session.entries.indices { session.entries[i].shortcutNumber = nil }
-        session.numberedEntries = Array(session.entries.indices.filter {
-            session.entries[$0].window == nil && !session.entries[$0].isFallback
-        }.prefix(9))
-        for (number, index) in session.numberedEntries.enumerated() {
-            session.entries[index].shortcutNumber = number + 1
-        }
     }
 
     private func update(_ session: Session) {
@@ -360,10 +351,8 @@ final class WindowSwitcher {
             dismiss()
             return
         }
-        assignShortcutNumbers(in: session)
         let clamped = min(anchor, kept.count - 1)
         session.cycle.setIndex(clamped, hasCurrent: session.hasCurrent)
-        shortcut?.panelDidShow(for: session.gesture, applicationCount: session.numberedEntries.count)
         panel?.invalidateLayout()
         update(session)
     }

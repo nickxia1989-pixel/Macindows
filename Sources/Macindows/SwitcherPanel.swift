@@ -7,7 +7,6 @@ struct SwitcherEntry {
     var window: AppWindow?
 
     var lastPreview: NSImage?
-    var shortcutNumber: Int?
     /// 为真表示应用在枚举时暂时未应答，仅作兜底卡片保留，不标注「没有打开的窗口」。
     var isFallback = false
     var previewSize: CGSize? { window?.frame?.size ?? lastPreview?.size }
@@ -108,6 +107,7 @@ private final class SwitcherCard: NSView {
     private let title: NSTextField
     private let appCount = NumberBadge()
     private let name: String
+    private let hasShortcutNumber: Bool
     private var selectedState = false
     private var hoveredState = false
     private var tracking: NSTrackingArea?
@@ -115,12 +115,12 @@ private final class SwitcherCard: NSView {
     var onPick: (() -> Void)?
     var onClose: (() -> Void)?
 
-    init(_ entry: SwitcherEntry, frame: NSRect) {
+    init(_ entry: SwitcherEntry, frame: NSRect, shortcutNumber: Int?) {
         self.entry = entry
+        hasShortcutNumber = shortcutNumber != nil
         appPath = entry.app.bundleURL?.standardizedFileURL.path
         let detail = entry.window == nil ? (entry.isFallback ? nil : L("没有打开的窗口")) : entry.app.localizedName
-        let number = entry.shortcutNumber
-        name = [entry.title, detail, entry.statusText, number.map { String(format: L("快捷键 %d"), $0) }]
+        name = [entry.title, detail, entry.statusText, shortcutNumber.map { String(format: L("快捷键 %d"), $0) }]
             .compactMap { $0 }.joined(separator: " · ")
         title = NSTextField(labelWithString: entry.title)
         super.init(frame: frame)
@@ -167,6 +167,18 @@ private final class SwitcherCard: NSView {
         title.frame = NSRect(x: 10, y: bounds.height - SwitcherLayout.titleSpace, width: bounds.width - 20, height: 19)
         addSubview(title)
         addSubview(appCount)
+        if let shortcutNumber {
+            let key = NSTextField(labelWithString: String(shortcutNumber))
+            key.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+            key.textColor = .white
+            key.alignment = .center
+            key.wantsLayer = true
+            key.layer?.cornerRadius = 5
+            key.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.65).cgColor
+            key.frame = NSRect(x: SwitcherLayout.pictureInset + 3, y: SwitcherLayout.pictureInset + 3, width: 20, height: 17)
+            key.setAccessibilityElement(false)
+            addSubview(key)
+        }
 
         closeChip.wantsLayer = true
         closeChip.layer?.cornerRadius = 10
@@ -190,18 +202,6 @@ private final class SwitcherCard: NSView {
         badge.isHidden = true
         preview.layer?.borderWidth = 1
         positionPicture(size: entry.previewSize)
-        if let number {
-            let key = NSTextField(labelWithString: String(number))
-            key.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
-            key.textColor = .white
-            key.alignment = .center
-            key.wantsLayer = true
-            key.layer?.cornerRadius = 5
-            key.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.65).cgColor
-            key.frame = NSRect(x: SwitcherLayout.pictureInset + 3, y: SwitcherLayout.pictureInset + 3, width: 20, height: 17)
-            key.setAccessibilityElement(false)
-            addSubview(key)
-        }
         updateColors()
     }
 
@@ -232,8 +232,14 @@ private final class SwitcherCard: NSView {
     private func positionCloseButton() {
         let inset = SwitcherLayout.pictureInset + 3
         let size: CGFloat = 20
-        // 右上角已有数字角标时，关闭按钮放到左上角以免遮挡。
-        let x = appCount.number == nil ? bounds.width - inset - size : inset
+        let x: CGFloat
+        if appCount.number == nil {
+            x = bounds.width - inset - size
+        } else {
+            // 右上角有未读角标时，关闭按钮放到角标左侧并避开左上角 1–9 编号。
+            let minX = hasShortcutNumber ? (inset + 24) : inset
+            x = max(minX, appCount.frame.minX - size - 4)
+        }
         let frame = NSRect(x: x, y: inset, width: size, height: size)
         closeChip.frame = frame
         closeButton.frame = frame
@@ -323,7 +329,7 @@ final class SwitcherPanel: NSPanel {
     var onPick: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
     var onTurnPage: ((Int) -> Void)?
-    var onReveal: (() -> Void)?
+    var onPageChange: ((Range<Int>) -> Void)?
     private let previews: SwitcherPreviews
     private let glass = NSGlassEffectView()
     private let canvas = FlippedView()
@@ -461,13 +467,14 @@ final class SwitcherPanel: NSPanel {
             setFrame(frame, display: false)
             updateApplicationBadges(appBadges)
         }
-        if range != page {
+        let pageChanged = range != page
+        if pageChanged {
             clearPage()
             page = range
             let canShowImages = Thumbnailer.isAuthorized
-            for i in range {
+            for (slot, i) in range.enumerated() {
                 let entry = entries[i]
-                let card = SwitcherCard(entry, frame: geometry.frames[i])
+                let card = SwitcherCard(entry, frame: geometry.frames[i], shortcutNumber: slot < 9 ? slot + 1 : nil)
                 if canShowImages, let image = entry.window?.id.flatMap({ images[$0] }) ?? entry.lastPreview {
                     card.setImage(image)
                 }
@@ -485,7 +492,10 @@ final class SwitcherPanel: NSPanel {
             highlighted = chosen
         }
         updateHeader(for: entries[selected], geometry: geometry, pageIndex: pageIndex)
-        reveal()
+        let revealed = reveal()
+        if pageChanged || revealed {
+            onPageChange?(range)
+        }
     }
 
     /// 复用顶部标题栏，展示当前高亮窗口的完整标题与状态，避免卡片变窄时看不清窗口名。
@@ -559,7 +569,9 @@ final class SwitcherPanel: NSPanel {
                         width: size.width, height: size.height), display: false)
         heading.setFrameOrigin(NSPoint(x: 24, y: 16))
         pageNumber.isHidden = true
-        reveal()
+        if reveal() {
+            onPageChange?(0..<0)
+        }
     }
 
     private func clearPage() {
@@ -569,9 +581,10 @@ final class SwitcherPanel: NSPanel {
         page = 0..<0
     }
 
-    private func reveal() {
+    @discardableResult
+    private func reveal() -> Bool {
         let fromHidden = !isVisible
-        guard fromHidden || isDismissing else { return }
+        guard fromHidden || isDismissing else { return false }
         isDismissing = false
         ignoresMouseEvents = false
         canvas.setAccessibilityHidden(false)
@@ -580,7 +593,7 @@ final class SwitcherPanel: NSPanel {
             orderFrontRegardless()
         }
         transition(showing: true, fromHidden: fromHidden)
-        onReveal?()
+        return true
     }
 
     func dismiss(animated: Bool = true) {

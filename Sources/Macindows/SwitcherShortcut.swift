@@ -13,7 +13,7 @@ final class SwitcherShortcut {
         case quitSelected
         case commit
         case cancel
-        case openApplication(Int)
+        case selectShortcut(Int)
     }
 
     var onAction: ((_ gesture: Int, _ action: Action) -> Void)?
@@ -22,7 +22,7 @@ final class SwitcherShortcut {
     private let lock = NSLock()
     private var serial = 0
     private var tracking: Int?
-    private var visibleApplicationCount: Int?
+    private var visibleShortcutCount: Int?
     private var swallowed = Set<Int>()
     private var stopping = false
 
@@ -66,8 +66,8 @@ final class SwitcherShortcut {
         lock.withLock { if tracking == gesture { tracking = nil } }
     }
 
-    func panelDidShow(for gesture: Int, applicationCount: Int) {
-        lock.withLock { if tracking == gesture { visibleApplicationCount = applicationCount } }
+    func panelDidShow(for gesture: Int, shortcutCount: Int) {
+        lock.withLock { if tracking == gesture { visibleShortcutCount = shortcutCount } }
     }
 
     private static let digits: [Int: Int] = [
@@ -121,7 +121,7 @@ final class SwitcherShortcut {
            !repeating || tracking != nil {
             if tracking == nil {
                 serial += 1
-                visibleApplicationCount = nil
+                visibleShortcutCount = nil
             }
             tracking = serial
             swallowed.insert(key)
@@ -152,14 +152,14 @@ final class SwitcherShortcut {
                 send(.move(direction), for: tracking)
                 return true
             }
-            // 面板已显示时的快捷操作：数字键打开无窗口应用；W 关闭窗口、Q 退出应用、H 隐藏、M 最小化。
-            if visibleApplicationCount != nil,
+            // 面板已显示时的快捷操作：数字键直达当前页前 9 张卡片；W 关闭窗口、Q 退出应用、H 隐藏、M 最小化。
+            if visibleShortcutCount != nil,
                flags.intersection([.maskControl, .maskAlternate, .maskShift, .maskSecondaryFn]).isEmpty {
-                if let number = Self.digits[key], let count = visibleApplicationCount {
+                if let number = Self.digits[key], let count = visibleShortcutCount {
                     swallowed.insert(key)
                     if number <= count {
                         self.tracking = nil
-                        send(.openApplication(number - 1), for: tracking)
+                        send(.selectShortcut(number - 1), for: tracking)
                     }
                     return true
                 }

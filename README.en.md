@@ -65,7 +65,7 @@ Enable **Switch Windows with ⌘Tab** from the four-pane menu bar icon. It is of
 
 - Visible, minimized and hidden windows share one most-recently-used order with running apps whose windows have all been closed. Entries without focus history are ordered by app launch time, then by newest window within the same app.
 - A running app with no windows shows its name and the last available preview of its final closed window. If no preview is available, its icon appears inside a window outline. Release ⌘ on the card or click it to reopen the app.
-- The first nine windowless apps in the list have a **1–9** shortcut at the top left of their cards. Press the matching number on the number row or keypad while the switcher is visible to open the app.
+- The first nine cards on the current page (both open windows and windowless apps) show a **1–9** shortcut at the top left. Press the matching number on the number row or keypad while the switcher is visible to switch to or reopen it directly.
 - When an app has a numeric Dock badge, each of its window cards shows that number in a red badge at the top right. Counts refresh when you open the switcher.
 - Tap ⌘Tab to switch back. Keep holding ⌘ and press Tab or ⇧Tab to cycle forward or backward, across pages if needed.
 - Release ⌘ or click a card to focus that window. Minimized windows are restored automatically. Press Esc to cancel.

@@ -7,9 +7,9 @@ public enum SwitcherDirection: Equatable {
 
 /// 快速切换面板按窗口顺序逐行排版，卡片宽度取决于窗口的宽高比。坐标原点在面板左上角。
 public struct SwitcherLayout {
-    public static let inset: CGFloat = 16
+    public static let inset: CGFloat = 14
     public static let pictureInset: CGFloat = 7
-    public static let titleSpace: CGFloat = 30
+    public static let titleSpace: CGFloat = 28
     public static let defaultAspect: CGFloat = 1.6
     public let size: CGSize
     /// 每张卡片在所属页面中的位置，下标就是窗口下标。
@@ -17,11 +17,10 @@ public struct SwitcherLayout {
     public let pages: [Range<Int>]
 
     public init(windowSizes: [CGSize?], screenSize: CGSize) {
-        let gap: CGFloat = 8, top: CGFloat = 46, bottom = Self.inset
-        // 在小屏幕上把空间留给窗口，只在屏幕外围留少量空白。
-        let room = CGSize(width: max(1, floor(screenSize.width - min(64, screenSize.width * 0.06) - 2 * Self.inset)),
-                          height: max(1, floor(screenSize.height - min(64, screenSize.height * 0.06) - top - bottom)))
-        let minWidth = min(room.width, 236)
+        let gap: CGFloat = 10, top: CGFloat = 42, bottom = Self.inset
+        let maxRoom = CGSize(width: max(1, floor(screenSize.width - min(64, screenSize.width * 0.06) - 2 * Self.inset)),
+                             height: max(1, floor(screenSize.height - min(64, screenSize.height * 0.06) - top - bottom)))
+        let minWidth = min(maxRoom.width, 236)
         guard !windowSizes.isEmpty else {
             frames = []
             pages = []
@@ -32,14 +31,14 @@ public struct SwitcherLayout {
         let aspects = windowSizes.map(Self.aspect(of:))
 
         // 过窄的卡片为标题留位置，超宽窗口也给相邻卡片留空间。预览本身始终按原比例放入。
-        func rows(at height: CGFloat) -> [[CGRect]] {
+        func rows(at height: CGFloat, in roomWidth: CGFloat) -> [[CGRect]] {
             var result: [[CGRect]] = []
             var row: [CGRect] = []
             var x: CGFloat = 0
-            let titleWidth = max(120, min(172, round(height * 0.72)))
+            let titleWidth = max(120, min(168, round(height * 0.72)))
             for aspect in aspects {
-                let width = min(room.width, max(titleWidth, round(min(aspect, 2.8) * height) + 2 * Self.pictureInset))
-                if !row.isEmpty, x + width > room.width {
+                let width = min(roomWidth, max(titleWidth, round(min(aspect, 2.8) * height) + 2 * Self.pictureInset))
+                if !row.isEmpty, x + width > roomWidth {
                     result.append(row)
                     row = []
                     x = 0
@@ -51,20 +50,35 @@ public struct SwitcherLayout {
             return result
         }
 
-        // 找仍能整页放下的最大预览高度。只有降到可辨认的下限仍放不下时才分页。
-        let maximum = max(1, min(260, Int(room.height - chrome)))
-        var low = min(80, maximum), high = maximum
+        func fitsAll(at height: Int, in room: CGSize) -> Bool {
+            let count = rows(at: CGFloat(height), in: room.width).count
+            return CGFloat(count) * (CGFloat(height) + chrome + gap) - gap <= room.height
+        }
+
+        // 日常窗口数优先落在屏幕中央克制的浮窗范围内（约占屏幕 72%×64%，单卡高度上限 156），
+        // 避免几扇窗口就把屏幕铺满；只有窗口极多、舒适尺寸放不下时才向外扩展空间再分页。
+        let comfortableMaxHeight = 156
+        let comfortableMinHeight = 104
+        let comfortableRoom = CGSize(
+            width: min(maxRoom.width, max(min(maxRoom.width, 640), floor(min(screenSize.width * 0.72, 1080)) - 2 * Self.inset)),
+            height: min(maxRoom.height, max(min(maxRoom.height, 360), floor(min(screenSize.height * 0.64, 580)) - top - bottom))
+        )
+        let comfortableCap = max(1, min(comfortableMaxHeight, Int(comfortableRoom.height - chrome)))
+        let useComfortable = comfortableCap >= comfortableMinHeight && fitsAll(at: comfortableMinHeight, in: comfortableRoom)
+
+        let room = useComfortable ? comfortableRoom : maxRoom
+        let maximum = max(1, min(comfortableMaxHeight, Int(room.height - chrome)))
+        var low = min(useComfortable ? comfortableMinHeight : 80, maximum), high = maximum
         while low < high {
             let middle = (low + high + 1) / 2
-            let count = rows(at: CGFloat(middle)).count
-            if CGFloat(count) * (CGFloat(middle) + chrome + gap) - gap <= room.height {
+            if fitsAll(at: middle, in: room) {
                 low = middle
             } else {
                 high = middle - 1
             }
         }
 
-        let packedRows = rows(at: CGFloat(low))
+        let packedRows = rows(at: CGFloat(low), in: room.width)
         let rowStride = CGFloat(low) + chrome + gap
         let rowsPerPage = min(packedRows.count, max(1, Int((room.height + gap) / rowStride)))
         let gridWidth = min(room.width, max(minWidth, packedRows.compactMap { $0.last?.maxX }.max() ?? 0))

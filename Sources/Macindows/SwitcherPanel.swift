@@ -96,7 +96,10 @@ private final class NumberBadge: NSView {
 
 private final class SwitcherCard: NSView {
     override var isFlipped: Bool { true }
+    private static let previewRadius: CGFloat = 8
     private let entry: SwitcherEntry
+    private let previewShadow = NSView()
+    private let shadowMask = CAShapeLayer()
     private let preview = NSImageView()
     private let fallback = NSImageView()
     private let badge = NSImageView()
@@ -125,13 +128,25 @@ private final class SwitcherCard: NSView {
         title = NSTextField(labelWithString: entry.title)
         super.init(frame: frame)
         wantsLayer = true
-        layer?.cornerRadius = 13
+        layer?.cornerRadius = 12
         layer?.cornerCurve = .continuous
+
+        previewShadow.wantsLayer = true
+        previewShadow.layer?.shadowColor = NSColor.black.cgColor
+        previewShadow.layer?.shadowOpacity = 0.45
+        previewShadow.layer?.shadowRadius = 7
+        previewShadow.layer?.shadowOffset = CGSize(width: 0, height: 2)
+        shadowMask.fillRule = .evenOdd
+        previewShadow.layer?.mask = shadowMask
+        addSubview(previewShadow)
+
         preview.imageScaling = .scaleProportionallyUpOrDown
         preview.wantsLayer = true
-        preview.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.12).cgColor
-        preview.layer?.cornerRadius = 8
+        preview.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
+        preview.layer?.cornerRadius = Self.previewRadius
+        preview.layer?.cornerCurve = .continuous
         preview.layer?.masksToBounds = true
+        preview.layer?.borderWidth = 0.75
         addSubview(preview)
 
         fallback.image = entry.app.icon ?? NSImage(systemSymbolName: "macwindow", accessibilityDescription: nil)
@@ -149,7 +164,7 @@ private final class SwitcherCard: NSView {
         if let symbol = entry.statusSymbol {
             statusPill.wantsLayer = true
             statusPill.layer?.cornerRadius = 9
-            statusPill.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.6).cgColor
+            statusPill.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.65).cgColor
             statusIcon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: entry.statusText)
             statusIcon.symbolConfiguration = .init(pointSize: 10, weight: .semibold)
             statusIcon.contentTintColor = .white
@@ -161,28 +176,32 @@ private final class SwitcherCard: NSView {
             statusPill.isHidden = true
         }
 
-        title.font = .systemFont(ofSize: 13, weight: .medium)
+        title.font = .systemFont(ofSize: 12.5, weight: .medium)
         title.lineBreakMode = .byTruncatingTail
         title.maximumNumberOfLines = 1
-        title.frame = NSRect(x: 10, y: bounds.height - SwitcherLayout.titleSpace, width: bounds.width - 20, height: 19)
+        title.frame = NSRect(x: 10, y: bounds.height - SwitcherLayout.titleSpace + 2, width: bounds.width - 20, height: 18)
         addSubview(title)
         addSubview(appCount)
         if let shortcutNumber {
             let key = NSTextField(labelWithString: String(shortcutNumber))
-            key.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+            key.font = .monospacedDigitSystemFont(ofSize: 11.5, weight: .semibold)
             key.textColor = .white
             key.alignment = .center
             key.wantsLayer = true
             key.layer?.cornerRadius = 5
-            key.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.65).cgColor
-            key.frame = NSRect(x: SwitcherLayout.pictureInset + 3, y: SwitcherLayout.pictureInset + 3, width: 20, height: 17)
+            key.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.7).cgColor
+            key.layer?.borderWidth = 0.5
+            key.layer?.borderColor = NSColor.white.withAlphaComponent(0.22).cgColor
+            key.frame = NSRect(x: SwitcherLayout.pictureInset + 4, y: SwitcherLayout.pictureInset + 4, width: 20, height: 17)
             key.setAccessibilityElement(false)
             addSubview(key)
         }
 
         closeChip.wantsLayer = true
         closeChip.layer?.cornerRadius = 10
-        closeChip.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.62).cgColor
+        closeChip.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.72).cgColor
+        closeChip.layer?.borderWidth = 0.5
+        closeChip.layer?.borderColor = NSColor.white.withAlphaComponent(0.2).cgColor
         closeChip.isHidden = true
         addSubview(closeChip)
 
@@ -200,7 +219,6 @@ private final class SwitcherCard: NSView {
         setAccessibilityRole(.button)
         updateDescription()
         badge.isHidden = true
-        preview.layer?.borderWidth = 1
         positionPicture(size: entry.previewSize)
         updateColors()
     }
@@ -209,20 +227,32 @@ private final class SwitcherCard: NSView {
 
     func setImage(_ image: NSImage) {
         positionPicture(size: image.size)
-        preview.layer?.borderWidth = 0
+        // 保留细描边与投影：浅色界面靠深色底板拉出反差，深色终端/编辑器靠细亮边分清轮廓。
+        preview.layer?.borderWidth = 0.75
         preview.image = image
         preview.alphaValue = entry.isDimmedPreview ? 0.78 : 1
         fallback.isHidden = true
         badge.isHidden = false
+        updateColors()
     }
 
     private func positionPicture(size: CGSize?) {
         let picture = SwitcherLayout.pictureFrame(for: size, in: bounds)
         preview.frame = picture
-        let symbolSide = min(72, round(min(picture.width, picture.height) * 0.52))
+        previewShadow.frame = picture
+        let shape = CGPath(roundedRect: NSRect(origin: .zero, size: picture.size),
+                           cornerWidth: Self.previewRadius, cornerHeight: Self.previewRadius, transform: nil)
+        previewShadow.layer?.shadowPath = shape
+        let around = NSRect(origin: .zero, size: picture.size).insetBy(dx: -24, dy: -24)
+        let outside = CGMutablePath()
+        outside.addRect(around)
+        outside.addPath(shape)
+        shadowMask.frame = NSRect(origin: .zero, size: picture.size)
+        shadowMask.path = outside
+        let symbolSide = min(64, round(min(picture.width, picture.height) * 0.52))
         fallback.frame = NSRect(x: picture.midX - symbolSide / 2, y: picture.midY - symbolSide / 2,
                                 width: symbolSide, height: symbolSide)
-        let badgeSide = min(38, max(20, round(picture.height * 0.23)), bounds.width - 6)
+        let badgeSide = min(34, max(20, round(picture.height * 0.24)), bounds.width - 6)
         let badgeX = max(3, min(bounds.width - badgeSide - 3, picture.maxX - badgeSide + 2))
         badge.frame = NSRect(x: badgeX, y: max(3, picture.maxY - badgeSide + 2), width: badgeSide, height: badgeSide)
         statusPill.frame = NSRect(x: picture.minX + 4, y: max(picture.minY + 4, picture.maxY - 22), width: 18, height: 18)
@@ -270,21 +300,23 @@ private final class SwitcherCard: NSView {
         let showClose = hoveredState && entry.window != nil
         closeButton.isHidden = !showClose
         closeChip.isHidden = !showClose
+        title.font = .systemFont(ofSize: 12.5, weight: selectedState ? .semibold : .medium)
+        title.textColor = selectedState ? .white : (hoveredState ? NSColor.white.withAlphaComponent(0.95) : NSColor.white.withAlphaComponent(0.84))
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            let fill: NSColor
             if selectedState {
-                fill = NSColor.controlAccentColor.withAlphaComponent(0.19)
+                layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.28).cgColor
+                layer?.borderColor = NSColor.controlAccentColor.cgColor
+                layer?.borderWidth = 2.5
             } else if hoveredState {
-                fill = NSColor.labelColor.withAlphaComponent(0.095)
+                layer?.backgroundColor = NSColor.white.withAlphaComponent(0.14).cgColor
+                layer?.borderColor = NSColor.white.withAlphaComponent(0.22).cgColor
+                layer?.borderWidth = 1
             } else {
-                fill = NSColor.labelColor.withAlphaComponent(0.045)
+                layer?.backgroundColor = NSColor.white.withAlphaComponent(0.065).cgColor
+                layer?.borderColor = NSColor.white.withAlphaComponent(0.10).cgColor
+                layer?.borderWidth = 0.5
             }
-            layer?.backgroundColor = fill.cgColor
-            layer?.borderColor = NSColor.controlAccentColor.cgColor
-            layer?.borderWidth = selectedState ? 2.5 : 0
-            if preview.image == nil {
-                preview.layer?.borderColor = NSColor.separatorColor.cgColor
-            }
+            preview.layer?.borderColor = NSColor.white.withAlphaComponent(preview.image == nil ? 0.16 : 0.22).cgColor
         }
     }
 
@@ -326,13 +358,22 @@ private final class SwitcherCard: NSView {
 
 /// 用同一页的预览一起展示卡片，后续截图更新原来的图像视图。
 final class SwitcherPanel: NSPanel {
+    /// 玻璃四周留出的透明边，用来画柔和圆角阴影，避免系统自带边框在深色下描出方形细线。
+    static let margin: CGFloat = 28
+    private static let cornerRadius: CGFloat = 22
+
     var onPick: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
     var onTurnPage: ((Int) -> Void)?
     var onPageChange: ((Range<Int>) -> Void)?
     private let previews: SwitcherPreviews
+    private let root = NSView()
+    private let shadowLayer = CALayer()
+    private let shadowMask = CAShapeLayer()
     private let glass = NSGlassEffectView()
+    private let rimView = GlassRimView()
     private let canvas = FlippedView()
+    private let headerDivider = NSView()
     private let headerIcon = NSImageView()
     private let heading = NSTextField(labelWithString: L("切换窗口"))
     private let statusTag = NSTextField(labelWithString: "")
@@ -350,11 +391,15 @@ final class SwitcherPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
+    /// 玻璃卡片本身在屏幕上的区域（不含四周透明阴影边）。
+    var cardFrame: NSRect { frame.insetBy(dx: Self.margin, dy: Self.margin) }
+
     /// 与悬停窗一致：让非激活面板的玻璃始终以活跃态渲染，避免发闷的磨砂质感。
     @objc(hasKeyAppearance) var alwaysLooksActive: Bool { true }
 
     init(previewCache: SharedPreviewCache = SharedPreviewCache()) {
         previews = SwitcherPreviews(cache: previewCache)
+        glass.contentView = canvas
         super.init(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         isFloatingPanel = true
         hidesOnDeactivate = false
@@ -363,32 +408,46 @@ final class SwitcherPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = true
+        // 不用系统窗口阴影：在 macOS 26/27 无边框深色面板上会描出底角方形、顶角错位的细线。改为自绘柔和阴影。
+        hasShadow = false
         animationBehavior = .none
-        // 让玻璃和卡片一起缩放，窗口本身始终使用最终布局和点击区域。
-        let root = NSView()
+        // 统一使用深色烟熏液态玻璃浮层，与浅色/白色应用窗口形成清晰的图底对比，避免「白底找白窗」。
+        appearance = NSAppearance(named: .darkAqua)
         root.wantsLayer = true
-        glass.wantsLayer = true
-        glass.autoresizingMask = [.width, .height]
+        shadowLayer.shadowColor = NSColor.black.cgColor
+        shadowLayer.shadowOpacity = 0.38
+        shadowLayer.shadowRadius = 14
+        shadowLayer.shadowOffset = CGSize(width: 0, height: -4)
+        shadowMask.fillRule = .evenOdd
+        shadowLayer.mask = shadowMask
+        root.layer?.addSublayer(shadowLayer)
         glass.style = .regular
-        glass.cornerRadius = 24
-        glass.contentView = canvas
+        glass.tintColor = NSColor(srgbRed: 0.09, green: 0.10, blue: 0.13, alpha: 0.38)
+        glass.cornerRadius = Self.cornerRadius
+        rimView.cornerRadius = Self.cornerRadius
         root.addSubview(glass)
+        root.addSubview(rimView)
         contentView = root
+        headerDivider.wantsLayer = true
+        headerDivider.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
+        headerDivider.isHidden = true
         headerIcon.imageScaling = .scaleProportionallyUpOrDown
         headerIcon.isHidden = true
-        heading.font = .systemFont(ofSize: 15, weight: .semibold)
+        heading.font = .systemFont(ofSize: 14, weight: .semibold)
+        heading.textColor = .white
         heading.lineBreakMode = .byTruncatingTail
         heading.maximumNumberOfLines = 1
         statusTagBackdrop.wantsLayer = true
         statusTagBackdrop.layer?.cornerRadius = 6
+        statusTagBackdrop.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.14).cgColor
         statusTagBackdrop.isHidden = true
         statusTag.font = .systemFont(ofSize: 11, weight: .medium)
-        statusTag.textColor = .secondaryLabelColor
+        statusTag.textColor = NSColor.white.withAlphaComponent(0.86)
         statusTag.alignment = .center
         statusTagBackdrop.addSubview(statusTag)
         pageNumber.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
-        pageNumber.textColor = .secondaryLabelColor
+        pageNumber.textColor = NSColor.white.withAlphaComponent(0.65)
+        canvas.addSubview(headerDivider)
         canvas.addSubview(headerIcon)
         canvas.addSubview(heading)
         canvas.addSubview(statusTagBackdrop)
@@ -455,16 +514,41 @@ final class SwitcherPanel: NSPanel {
         }
     }
 
+    private func applyFrame(size: NSSize, centeredIn visible: CGRect) {
+        let margin = Self.margin
+        let radius = Self.cornerRadius
+        let outer = NSSize(width: size.width + margin * 2, height: size.height + margin * 2)
+        let cardOrigin = NSPoint(x: round(visible.midX - size.width / 2), y: round(visible.midY - size.height / 2))
+        setFrame(NSRect(x: cardOrigin.x - margin, y: cardOrigin.y - margin, width: outer.width, height: outer.height), display: false)
+        let bounds = NSRect(origin: .zero, size: outer)
+        let card = NSRect(x: margin, y: margin, width: size.width, height: size.height)
+        root.frame = bounds
+        glass.cornerRadius = radius
+        glass.frame = card
+        rimView.frame = card
+        rimView.cornerRadius = radius
+        canvas.frame = NSRect(origin: .zero, size: size)
+
+        let outline = CGPath(roundedRect: card, cornerWidth: radius, cornerHeight: radius, transform: nil)
+        let outside = CGMutablePath()
+        outside.addRect(bounds)
+        outside.addPath(outline)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        shadowLayer.frame = bounds
+        shadowLayer.shadowPath = outline
+        shadowMask.frame = bounds
+        shadowMask.path = outside
+        CATransaction.commit()
+    }
+
     private func drawPage(entries: [SwitcherEntry], selected: Int,
                           visible: CGRect, geometry: SwitcherLayout, pageIndex: Int, range: Range<Int>, images: SwitcherPreviews.Images) {
         if layout == nil || visible != visibleFrame {
             clearPage()
             layout = geometry
             visibleFrame = visible
-            let size = geometry.size
-            let frame = NSRect(x: round(visible.midX - size.width / 2), y: round(visible.midY - size.height / 2),
-                               width: size.width, height: size.height)
-            setFrame(frame, display: false)
+            applyFrame(size: geometry.size, centeredIn: visible)
             updateApplicationBadges(appBadges)
         }
         let pageChanged = range != page
@@ -501,14 +585,18 @@ final class SwitcherPanel: NSPanel {
     /// 复用顶部标题栏，展示当前高亮窗口的完整标题与状态，避免卡片变窄时看不清窗口名。
     private func updateHeader(for entry: SwitcherEntry, geometry: SwitcherLayout, pageIndex: Int) {
         let edge = SwitcherLayout.inset + 4
+        let headerHeight: CGFloat = 42
         let panelWidth = geometry.size.width
         var rightEdge = panelWidth - edge
+
+        headerDivider.frame = NSRect(x: SwitcherLayout.inset, y: headerHeight - 4, width: max(0, panelWidth - 2 * SwitcherLayout.inset), height: 0.5)
+        headerDivider.isHidden = false
 
         if geometry.pages.count > 1 {
             pageNumber.stringValue = String(format: L("第 %d / %d 页"), pageIndex + 1, geometry.pages.count)
             pageNumber.sizeToFit()
             let pageOriginX = rightEdge - pageNumber.frame.width
-            pageNumber.setFrameOrigin(NSPoint(x: pageOriginX, y: round((46 - pageNumber.frame.height) / 2)))
+            pageNumber.setFrameOrigin(NSPoint(x: pageOriginX, y: round((headerHeight - 4 - pageNumber.frame.height) / 2)))
             pageNumber.isHidden = false
             rightEdge = pageOriginX - 10
         } else {
@@ -519,14 +607,11 @@ final class SwitcherPanel: NSPanel {
             statusTag.stringValue = tag
             statusTag.sizeToFit()
             let pillWidth = statusTag.frame.width + 12
-            let pillHeight: CGFloat = 20
+            let pillHeight: CGFloat = 19
             let pillX = rightEdge - pillWidth
-            statusTagBackdrop.frame = NSRect(x: pillX, y: round((46 - pillHeight) / 2), width: pillWidth, height: pillHeight)
+            statusTagBackdrop.frame = NSRect(x: pillX, y: round((headerHeight - 4 - pillHeight) / 2), width: pillWidth, height: pillHeight)
             statusTag.frame = NSRect(x: 6, y: round((pillHeight - statusTag.frame.height) / 2),
                                      width: statusTag.frame.width, height: statusTag.frame.height)
-            effectiveAppearance.performAsCurrentDrawingAppearance {
-                statusTagBackdrop.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.08).cgColor
-            }
             statusTagBackdrop.isHidden = false
             rightEdge = pillX - 8
         } else {
@@ -534,7 +619,7 @@ final class SwitcherPanel: NSPanel {
         }
 
         headerIcon.image = entry.app.icon ?? NSImage(systemSymbolName: "macwindow", accessibilityDescription: nil)
-        headerIcon.frame = NSRect(x: edge, y: 14, width: 18, height: 18)
+        headerIcon.frame = NSRect(x: edge, y: round((headerHeight - 4 - 18) / 2), width: 18, height: 18)
         headerIcon.isHidden = false
 
         let fullTitle: String
@@ -547,7 +632,7 @@ final class SwitcherPanel: NSPanel {
         heading.sizeToFit()
         let titleX = edge + 24
         let available = max(40, rightEdge - titleX)
-        heading.frame = NSRect(x: titleX, y: round((46 - heading.frame.height) / 2),
+        heading.frame = NSRect(x: titleX, y: round((headerHeight - 4 - heading.frame.height) / 2),
                                width: min(heading.frame.width, available), height: heading.frame.height)
     }
 
@@ -560,13 +645,13 @@ final class SwitcherPanel: NSPanel {
         previews.endPage()
         let visible = screen.visibleFrame
         clearPage()
+        headerDivider.isHidden = true
         headerIcon.isHidden = true
         statusTagBackdrop.isHidden = true
         heading.stringValue = L("没有可切换的窗口")
         heading.sizeToFit()
         let size = NSSize(width: heading.frame.width + 48, height: heading.frame.height + 32)
-        setFrame(NSRect(x: round(visible.midX - size.width / 2), y: round(visible.midY - size.height / 2),
-                        width: size.width, height: size.height), display: false)
+        applyFrame(size: size, centeredIn: visible)
         heading.setFrameOrigin(NSPoint(x: 24, y: 16))
         pageNumber.isHidden = true
         if reveal() {
@@ -613,11 +698,11 @@ final class SwitcherPanel: NSPanel {
         let generation = transitionGeneration
         let duration = showing ? 0.13 : 0.09
         let curve = CAMediaTimingFunction(name: showing ? .easeOut : .easeIn)
-        if let layer = glass.layer {
+        if let layer = root.layer {
             let current = layer.presentation()?.transform ?? CATransform3DIdentity
             layer.removeAnimation(forKey: "switcherScale")
             if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-                // AppKit 可以把图层的锚点设在角上；以玻璃中心为缩放原点。
+                // AppKit 可以把图层的锚点设在角上；以面板中心为缩放原点。
                 func scaled(_ factor: CGFloat) -> CATransform3D {
                     let dx = layer.bounds.width * (0.5 - layer.anchorPoint.x) * (1 - factor)
                     let dy = layer.bounds.height * (0.5 - layer.anchorPoint.y) * (1 - factor)
@@ -646,7 +731,7 @@ final class SwitcherPanel: NSPanel {
     private func finishDismissal() {
         transitionGeneration += 1
         if isVisible { orderOut(nil) }
-        glass.layer?.removeAnimation(forKey: "switcherScale")
+        root.layer?.removeAnimation(forKey: "switcherScale")
         isDismissing = false
         layout = nil
         clearPage()

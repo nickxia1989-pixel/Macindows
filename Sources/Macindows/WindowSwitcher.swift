@@ -100,7 +100,7 @@ final class WindowSwitcher {
     func mouseDown(at point: CGPoint) {
         guard session != nil else { return }
         let location = CGPoint(x: point.x, y: primaryScreenHeight - point.y)
-        if let panel, panel.isVisible, !panel.ignoresMouseEvents, panel.frame.contains(location) { return }
+        if let panel, panel.isVisible, !panel.ignoresMouseEvents, panel.cardFrame.contains(location) { return }
         dismiss()
     }
 

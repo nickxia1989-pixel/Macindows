@@ -118,4 +118,13 @@ final class SwitcherLayoutTests: XCTestCase {
             XCTAssertTrue(many.pages[1].contains(nextPageCard))
         }
     }
+
+    func testEverydayWindowCountsStayCompactAndCentered() {
+        for count in [3, 6, 12] {
+            let layout = SwitcherLayout(windowSizes: Array<CGSize?>(repeating: landscape, count: count), screenSize: laptop)
+            XCTAssertEqual(layout.pages, [0..<count])
+            XCTAssertLessThanOrEqual(layout.size.width, laptop.width * 0.75)
+            XCTAssertLessThanOrEqual(layout.size.height, laptop.height * 0.68)
+        }
+    }
 }
